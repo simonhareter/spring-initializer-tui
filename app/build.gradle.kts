@@ -19,6 +19,7 @@ repositories {
 dependencies {
     // This dependency is used by the application.
     implementation(libs.guava)
+    implementation("net.java.dev.jna:jna:5.19.1")
 }
 
 testing {
@@ -40,5 +41,6 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass = "org.springinit.Main"
+    mainClass = "org.simonhareter.Main"
+    applicationName = "spring-initializer"
 }
