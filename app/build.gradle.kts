@@ -23,6 +23,8 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.19.1")
     // Source: https://mvnrepository.com/artifact/net.java.dev.jna/jna-platform
     implementation("net.java.dev.jna:jna-platform:5.19.1")
+    // Source: https://mvnrepository.com/artifact/tools.jackson.core/jackson-databind
+    implementation("tools.jackson.core:jackson-databind:3.2.1")
 }
 
 testing {

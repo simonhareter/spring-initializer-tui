@@ -8,7 +8,7 @@ public final class TerminalFactory {
     }
 
     public static Terminal create() {
-        if (isLinux()) { 
+        if (isLinux()) {
             return new UnixTerminal();
         } else if (isMac()) {
             return new MacTerminal();
