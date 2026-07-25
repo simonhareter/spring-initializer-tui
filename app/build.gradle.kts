@@ -19,7 +19,10 @@ repositories {
 dependencies {
     // This dependency is used by the application.
     implementation(libs.guava)
+    // Source: https://mvnrepository.com/artifact/net.java.dev.jna/jna
     implementation("net.java.dev.jna:jna:5.19.1")
+    // Source: https://mvnrepository.com/artifact/net.java.dev.jna/jna-platform
+    implementation("net.java.dev.jna:jna-platform:5.19.1")
 }
 
 testing {
@@ -39,8 +42,15 @@ java {
     }
 }
 
+tasks.run.configure {
+    standardInput = System.`in`
+}
+
 application {
     // Define the main class for the application.
     mainClass = "org.simonhareter.Main"
     applicationName = "spring-initializer"
+       applicationDefaultJvmArgs = listOf(
+        "--enable-native-access=ALL-UNNAMED"
+    )
 }
