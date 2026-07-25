@@ -7,6 +7,9 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+import org.simonhareter.springinit.dtos.MetaData;
 import org.simonhareter.springinit.libc.Terminal;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -17,6 +20,7 @@ public class SpringInit {
     private boolean isRunning;
     private int cursorX, cursorY;
     private MetaData data;
+    private List<List<Integer>> menuGrid;
 
     public SpringInit(Terminal terminal) {
         this.terminal = terminal;
@@ -35,7 +39,10 @@ public class SpringInit {
         this.isRunning = true;
         this.cursorX = 0;
         this.cursorY = 0;
+        this.menuGrid = new ArrayList<>();
         fetchSpringInitData();
+        fillMenuGrid();
+        IO.print(this.menuGrid);
         terminal.enableRawMode();
     }
 
@@ -59,7 +66,6 @@ public class SpringInit {
 
             this.data = mapper.treeToValue(json, MetaData.class);
 
-            IO.println(data.language());
             con.disconnect();
         } catch (MalformedURLException e) {
             IO.println("Malformed URL: " + e.getMessage());
@@ -69,6 +75,49 @@ public class SpringInit {
             IO.println("IOException: " + e.getMessage());
         }
 
+    }
+
+    private void fillMenuGrid() {
+        int size = 0;
+
+        for (int i = 0; i < 9; i++) {
+            switch (i) {
+                case 0 -> {
+                    // ignore gradle-build and maven-build
+                    int ignoreOptionsSize = 2;
+                    size = this.data.type().values().size() - ignoreOptionsSize;
+                }
+                case 1 -> {
+                    size = this.data.language().values().size();
+                }
+                case 2 -> {
+                    size = this.data.bootVersion().values().size();
+                }
+                case 3, 4, 5 -> size = 1;
+                case 6 -> {
+                    size = this.data.packaging().values().size();
+                }
+                case 7 -> {
+                    size = this.data.configurationFileFormat().values().size();
+                }
+                case 8 -> {
+                    size = this.data.javaVersion().values().size();
+                }
+            }
+
+            List<Integer> list = createRangeList(size);
+            this.menuGrid.add(list);
+        }
+    }
+
+    private List<Integer> createRangeList(int size) {
+        List<Integer> list = new ArrayList<>();
+
+        for (int i = 0; i < size; i++) {
+            list.add(i);
+        }
+
+        return list;
     }
 
     private int readKey() {
@@ -110,14 +159,25 @@ public class SpringInit {
 
     private void move(int key) {
         Direction dir = getDirection(key);
+
+        int newRow = this.cursorY;
+        int newCol = this.cursorX;
+
         switch (dir) {
-            case UP -> this.cursorY--;
-            case DOWN -> this.cursorY++;
-            case LEFT -> this.cursorX--;
-            case RIGHT -> this.cursorX++;
+            case UP -> newRow--;
+            case DOWN -> newRow++;
+            case LEFT -> newCol--;
+            case RIGHT -> newCol++;
         }
-        IO.print("move");
-        IO.println(this.cursorX + ":" + this.cursorY);
+
+        if (isIllegalMove(newRow, newCol)) {
+            return;
+        }
+
+        this.cursorY = newRow;
+        this.cursorX = newCol;
+
+        IO.print(this.cursorX + " : " + this.cursorY + "\r\n");
     }
 
     private Direction getDirection(int key) {
@@ -129,6 +189,18 @@ public class SpringInit {
         };
     }
 
+    private boolean isIllegalMove(int newRow, int newCol) {
+       if(newRow < 0 || newRow >= this.menuGrid.size()) {
+           return true;
+       }
+
+       if(newCol < 0 || newCol >= this.menuGrid.get(newRow).size()) {
+           return true;
+       }
+
+       return false;
+    }
+
     private void select() {
         IO.println("select");
     }
@@ -137,5 +209,11 @@ public class SpringInit {
         IO.println("reset");
         this.cursorX = 0;
         this.cursorY = 0;
+    }
+
+    private void printMetaData(ObjectMapper mapper) {
+        IO.println(
+                mapper.writerWithDefaultPrettyPrinter()
+                        .writeValueAsString(this.data));
     }
 }
