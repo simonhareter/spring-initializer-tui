@@ -10,6 +10,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import org.simonhareter.springinit.dtos.MetaData;
+import org.simonhareter.springinit.dtos.MetaDataOption;
 import org.simonhareter.springinit.libc.Terminal;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -28,10 +29,12 @@ public class SpringInit {
 
     public void start() {
         init();
+        renderUI();
 
         while (isRunning) {
             int key = readKey();
             handleKey(key);
+            // IO.print(this.cursorY + " : " + this.cursorX + "\r\n");
         }
     }
 
@@ -42,7 +45,7 @@ public class SpringInit {
         this.menuGrid = new ArrayList<>();
         fetchSpringInitData();
         fillMenuGrid();
-        IO.print(this.menuGrid);
+        // IO.print(this.menuGrid);
         terminal.enableRawMode();
     }
 
@@ -175,9 +178,13 @@ public class SpringInit {
         }
 
         this.cursorY = newRow;
-        this.cursorX = newCol;
+        if (newCol >= this.menuGrid.get(newRow).size()) {
+            this.cursorX = this.menuGrid.get(newRow).size() - 1;
+        } else {
+            this.cursorX = newCol;
+        }
 
-        IO.print(this.cursorX + " : " + this.cursorY + "\r\n");
+        // IO.print(this.cursorX + " : " + this.cursorY + "\r\n");
     }
 
     private Direction getDirection(int key) {
@@ -190,15 +197,13 @@ public class SpringInit {
     }
 
     private boolean isIllegalMove(int newRow, int newCol) {
-       if(newRow < 0 || newRow >= this.menuGrid.size()) {
-           return true;
-       }
-
-       if(newCol < 0 || newCol >= this.menuGrid.get(newRow).size()) {
-           return true;
-       }
-
-       return false;
+        if (newRow < 0 || newRow >= this.menuGrid.size()) {
+            return true;
+        } else if (this.cursorY == newRow && (newCol < 0 || newCol >= this.menuGrid.get(newRow).size())) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     private void select() {
@@ -209,6 +214,98 @@ public class SpringInit {
         IO.println("reset");
         this.cursorX = 0;
         this.cursorY = 0;
+    }
+
+    private void renderUI() {
+        String selected = "\u25CF"; // ●
+        String unselected = "\u25CB"; // ○
+
+        StringBuilder builder = new StringBuilder();
+
+        String GREEN = "\033[38;2;109;179;63m";
+        String RESET = "\033[0m";
+
+        String[] logo = {
+                "  ____             _                  ___       _ _   _       _ _          ",
+                " / ___| _ __  _ __(_)_ __   __ _     |_ _|_ __ (_) |_(_) __ _| (_)_____ __ ",
+                " \\___ \\| '_ \\| '__| | '_ \\ / _` |_____| || '_ \\| | __| |/ _` | | |_  / '__|",
+                "  ___) | |_) | |  | | | | | (_| |_____| || | | | | |_| | (_| | | |/ /| |   ",
+                " |____/| .__/|_|  |_|_| |_|\\__, |    |___|_| |_|_|\\__|_|\\__,_|_|_/___|_|   ",
+                "       |_|                 |___/                                            "
+        };
+
+        for (String line : logo) {
+            builder.append(GREEN)
+                    .append(line.substring(0, 35))
+                    .append(RESET)
+                    .append(line.substring(35))
+                    .append("\r\n");
+        }
+        builder.append("\r\n");
+
+        builder.append("Project\r\n");
+        builder.append("\r\n");
+        for (MetaDataOption option : this.data.type().values()) {
+            if (option.name().equals("Gradle Config") || option.name().equals("Maven POM")) {
+                continue;
+            }
+            builder.append(unselected + " " + option.name() + "  ");
+        }
+
+        builder.append("\r\n");
+        builder.append("\r\n");
+
+        builder.append("Language\r\n");
+        builder.append("\r\n");
+        for (MetaDataOption option : this.data.language().values()) {
+            builder.append(unselected + " " + option.name() + "  ");
+        }
+
+        builder.append("\r\n");
+        builder.append("\r\n");
+
+        builder.append("Spring Boot\r\n");
+        builder.append("\r\n");
+        for (MetaDataOption option : this.data.bootVersion().values()) {
+            builder.append(unselected + " " + option.name() + "  ");
+        }
+
+        builder.append("\r\n");
+        builder.append("\r\n");
+
+        builder.append("Project Metadata\r\n");
+        builder.append("\r\n");
+        builder.append("Group\r\n");
+        builder.append("Artifact\r\n");
+        builder.append("Package name\r\n");
+
+        builder.append("\r\n");
+
+        builder.append("Packaging\r\n");
+        builder.append("\r\n");
+        for (MetaDataOption option : this.data.packaging().values()) {
+            builder.append(unselected + " " + option.name() + "  ");
+        }
+
+        builder.append("\r\n");
+        builder.append("\r\n");
+
+        builder.append("Configuration\r\n");
+        builder.append("\r\n");
+        for (MetaDataOption option : this.data.configurationFileFormat().values()) {
+            builder.append(unselected + " " + option.name() + "  ");
+        }
+
+        builder.append("\r\n");
+        builder.append("\r\n");
+
+        builder.append("Java\r\n");
+        builder.append("\r\n");
+        for (MetaDataOption option : this.data.javaVersion().values()) {
+            builder.append(unselected + " " + option.name() + "  ");
+        }
+
+        IO.print(builder);
     }
 
     private void printMetaData(ObjectMapper mapper) {

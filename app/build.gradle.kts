@@ -51,7 +51,7 @@ tasks.run.configure {
 application {
     // Define the main class for the application.
     mainClass = "org.simonhareter.Main"
-    applicationName = "spring-initializer"
+    applicationName = "spring-initializr"
        applicationDefaultJvmArgs = listOf(
         "--enable-native-access=ALL-UNNAMED"
     )
