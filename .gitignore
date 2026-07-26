@@ -1,5 +1,6 @@
 biome.json
 metadata.json
+cache.json
 
 # Ignore Gradle project-specific cache directory
 .gradle
