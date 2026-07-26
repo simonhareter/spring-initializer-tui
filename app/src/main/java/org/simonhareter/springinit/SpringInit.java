@@ -7,10 +7,13 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.simonhareter.springinit.dtos.MetaData;
-import org.simonhareter.springinit.dtos.MetaDataOption;
+import org.simonhareter.springinit.dtos.MetaDataCache;
 import org.simonhareter.springinit.libc.Terminal;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -18,22 +21,40 @@ import tools.jackson.databind.ObjectMapper;
 public class SpringInit {
     private final Terminal terminal;
 
+    private ObjectMapper mapper;
+    private MetaData data;
+    private MetaDataCache cache;
+    private Path cacheFile = Path.of("cache.json");
+    private List<List<Integer>> menuGrid;
+
     private boolean isRunning;
     private int cursorX, cursorY;
-    private MetaData data;
-    private List<List<Integer>> menuGrid;
+    private int[] currentSelection;
+    private String group, artifact, packageName;
+    private String[] logo = {
+            "  ____             _                  ___       _ _   _       _ _          ",
+            " / ___| _ __  _ __(_)_ __   __ _     |_ _|_ __ (_) |_(_) __ _| (_)_____ __ ",
+            " \\___ \\| '_ \\| '__| | '_ \\ / _` |_____| || '_ \\| | __| |/ _` | | |_  / '__|",
+            "  ___) | |_) | |  | | | | | (_| |_____| || | | | | |_| | (_| | | |/ /| |   ",
+            " |____/| .__/|_|  |_|_| |_|\\__, |    |___|_| |_|_|\\__|_|\\__,_|_|_/___|_|   ",
+            "       |_|                 |___/                                            "
+    };
 
     public SpringInit(Terminal terminal) {
         this.terminal = terminal;
     }
 
     public void start() {
+        clearScreen();
+        renderLoading();
         init();
-        renderUI();
+        clearScreen();
 
         while (isRunning) {
+            renderUI();
             int key = readKey();
             handleKey(key);
+            clearScreen();
             // IO.print(this.cursorY + " : " + this.cursorX + "\r\n");
         }
     }
@@ -43,9 +64,23 @@ public class SpringInit {
         this.cursorX = 0;
         this.cursorY = 0;
         this.menuGrid = new ArrayList<>();
-        fetchSpringInitData();
+        this.currentSelection = new int[6];
+        this.mapper = new ObjectMapper();
+
+        if (Files.exists(cacheFile)) {
+            this.cache = mapper.readValue(cacheFile.toFile(), MetaDataCache.class);
+
+            if (Instant.now().getEpochSecond() - this.cache.timestamp() < 86400) {
+                this.data = this.cache.data();
+            } else {
+                fetchSpringInitData();
+            }
+        } else {
+            fetchSpringInitData();
+        }
+
         fillMenuGrid();
-        // IO.print(this.menuGrid);
+
         terminal.enableRawMode();
     }
 
@@ -63,11 +98,16 @@ public class SpringInit {
 
             InputStream stream = status > 299 ? con.getErrorStream() : con.getInputStream();
 
-            ObjectMapper mapper = new ObjectMapper();
+            JsonNode json = this.mapper.readTree(stream);
 
-            JsonNode json = mapper.readTree(stream);
+            this.data = this.mapper.treeToValue(json, MetaData.class);
 
-            this.data = mapper.treeToValue(json, MetaData.class);
+            this.cache = new MetaDataCache(Instant.now().getEpochSecond(), this.data);
+            this.mapper.writeValue(this.cacheFile, this.cache);
+
+            // remove gradle-build and maven-build
+            this.data.type().values().remove(2);
+            this.data.type().values().remove(3);
 
             con.disconnect();
         } catch (MalformedURLException e) {
@@ -86,9 +126,7 @@ public class SpringInit {
         for (int i = 0; i < 9; i++) {
             switch (i) {
                 case 0 -> {
-                    // ignore gradle-build and maven-build
-                    int ignoreOptionsSize = 2;
-                    size = this.data.type().values().size() - ignoreOptionsSize;
+                    size = this.data.type().values().size();
                 }
                 case 1 -> {
                     size = this.data.language().values().size();
@@ -154,10 +192,14 @@ public class SpringInit {
 
     private void quit() {
         this.isRunning = false;
-        System.out.print("\033[2J"); // clear screen
-        System.out.print("\033[H"); // reset cursor
+        clearScreen();
         terminal.disableRawMode();
         System.exit(0);
+    }
+
+    private void clearScreen() {
+        System.out.print("\033[1J"); // clear screen
+        System.out.print("\033[H"); // reset cursor
     }
 
     private void move(int key) {
@@ -216,6 +258,32 @@ public class SpringInit {
         this.cursorY = 0;
     }
 
+    private void renderLoading() {
+        StringBuilder builder = new StringBuilder();
+        builder = renderLogo(builder);
+
+        builder.append("\r\n");
+        builder.append("\r\n");
+
+        builder.append("Loading metadata...");
+        IO.print(builder);
+    }
+
+    private StringBuilder renderLogo(StringBuilder builder) {
+        String GREEN = "\033[38;2;109;179;63m";
+        String RESET = "\033[0m";
+
+        for (String line : this.logo) {
+            builder.append(GREEN)
+                    .append(line.substring(0, 35))
+                    .append(RESET)
+                    .append(line.substring(35))
+                    .append("\r\n");
+        }
+        builder.append("\r\n");
+        return builder;
+    }
+
     private void renderUI() {
         String selected = "\u25CF"; // ●
         String unselected = "\u25CB"; // ○
@@ -225,16 +293,7 @@ public class SpringInit {
         String GREEN = "\033[38;2;109;179;63m";
         String RESET = "\033[0m";
 
-        String[] logo = {
-                "  ____             _                  ___       _ _   _       _ _          ",
-                " / ___| _ __  _ __(_)_ __   __ _     |_ _|_ __ (_) |_(_) __ _| (_)_____ __ ",
-                " \\___ \\| '_ \\| '__| | '_ \\ / _` |_____| || '_ \\| | __| |/ _` | | |_  / '__|",
-                "  ___) | |_) | |  | | | | | (_| |_____| || | | | | |_| | (_| | | |/ /| |   ",
-                " |____/| .__/|_|  |_|_| |_|\\__, |    |___|_| |_|_|\\__|_|\\__,_|_|_/___|_|   ",
-                "       |_|                 |___/                                            "
-        };
-
-        for (String line : logo) {
+        for (String line : this.logo) {
             builder.append(GREEN)
                     .append(line.substring(0, 35))
                     .append(RESET)
@@ -245,11 +304,13 @@ public class SpringInit {
 
         builder.append("Project\r\n");
         builder.append("\r\n");
-        for (MetaDataOption option : this.data.type().values()) {
-            if (option.name().equals("Gradle Config") || option.name().equals("Maven POM")) {
-                continue;
+
+        for (int i = 0; i < this.data.type().values().size(); i++) {
+            if (i == currentSelection[0]) {
+                builder.append(GREEN + selected + " " + this.data.type().values().get(i).name() + RESET + "  ");
+            } else {
+                builder.append(unselected + " " + this.data.type().values().get(i).name() + "  ");
             }
-            builder.append(unselected + " " + option.name() + "  ");
         }
 
         builder.append("\r\n");
@@ -257,8 +318,13 @@ public class SpringInit {
 
         builder.append("Language\r\n");
         builder.append("\r\n");
-        for (MetaDataOption option : this.data.language().values()) {
-            builder.append(unselected + " " + option.name() + "  ");
+
+        for (int i = 0; i < this.data.language().values().size(); i++) {
+            if (i == currentSelection[1]) {
+                builder.append(GREEN + selected + " " + this.data.language().values().get(i).name() + RESET + "  ");
+            } else {
+                builder.append(unselected + " " + this.data.language().values().get(i).name() + "  ");
+            }
         }
 
         builder.append("\r\n");
@@ -266,8 +332,13 @@ public class SpringInit {
 
         builder.append("Spring Boot\r\n");
         builder.append("\r\n");
-        for (MetaDataOption option : this.data.bootVersion().values()) {
-            builder.append(unselected + " " + option.name() + "  ");
+
+        for (int i = 0; i < this.data.bootVersion().values().size(); i++) {
+            if (i == currentSelection[2]) {
+                builder.append(GREEN + selected + " " + this.data.bootVersion().values().get(i).name() + RESET + "  ");
+            } else {
+                builder.append(unselected + " " + this.data.bootVersion().values().get(i).name() + "  ");
+            }
         }
 
         builder.append("\r\n");
@@ -283,8 +354,13 @@ public class SpringInit {
 
         builder.append("Packaging\r\n");
         builder.append("\r\n");
-        for (MetaDataOption option : this.data.packaging().values()) {
-            builder.append(unselected + " " + option.name() + "  ");
+
+        for (int i = 0; i < this.data.packaging().values().size(); i++) {
+            if (i == currentSelection[3]) {
+                builder.append(GREEN + selected + " " + this.data.packaging().values().get(i).name() + RESET + "  ");
+            } else {
+                builder.append(unselected + " " + this.data.packaging().values().get(i).name() + "  ");
+            }
         }
 
         builder.append("\r\n");
@@ -292,8 +368,14 @@ public class SpringInit {
 
         builder.append("Configuration\r\n");
         builder.append("\r\n");
-        for (MetaDataOption option : this.data.configurationFileFormat().values()) {
-            builder.append(unselected + " " + option.name() + "  ");
+
+        for (int i = 0; i < this.data.configurationFileFormat().values().size(); i++) {
+            if (i == currentSelection[4]) {
+                builder.append(GREEN + selected + " " + this.data.configurationFileFormat().values().get(i).name()
+                        + RESET + "  ");
+            } else {
+                builder.append(unselected + " " + this.data.configurationFileFormat().values().get(i).name() + "  ");
+            }
         }
 
         builder.append("\r\n");
@@ -301,16 +383,21 @@ public class SpringInit {
 
         builder.append("Java\r\n");
         builder.append("\r\n");
-        for (MetaDataOption option : this.data.javaVersion().values()) {
-            builder.append(unselected + " " + option.name() + "  ");
+
+        for (int i = 0; i < this.data.javaVersion().values().size(); i++) {
+            if (i == currentSelection[5]) {
+                builder.append(GREEN + selected + " " + this.data.javaVersion().values().get(i).name() + RESET + "  ");
+            } else {
+                builder.append(unselected + " " + this.data.javaVersion().values().get(i).name() + "  ");
+            }
         }
 
         IO.print(builder);
     }
 
-    private void printMetaData(ObjectMapper mapper) {
-        IO.println(
-                mapper.writerWithDefaultPrettyPrinter()
-                        .writeValueAsString(this.data));
-    }
+    // private void printMetaData(ObjectMapper mapper) {
+    // IO.println(
+    // mapper.writerWithDefaultPrettyPrinter()
+    // .writeValueAsString(this.data));
+    // }
 }
