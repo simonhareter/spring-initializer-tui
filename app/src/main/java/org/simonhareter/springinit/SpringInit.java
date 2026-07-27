@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.simonhareter.springinit.dtos.MetaData;
 import org.simonhareter.springinit.dtos.MetaDataCache;
@@ -29,8 +30,18 @@ public class SpringInit {
 
     private boolean isRunning;
     private int cursorX, cursorY;
+    private int previousCursorX, previousCursorY;
+    private int[] previousSelection;
     private int[] currentSelection;
     private String group, artifact, packageName;
+
+    private final String SELECTED = "\u25CF"; // ●
+    private final String UNSELECTED = "\u25CB"; // ○
+    private final String UNDERLINED = "\033[4m";
+    private final String RESET_UNDERLINED = "\033[24m";
+    private final String GREEN = "\033[38;2;109;179;63m";
+    private final String RESET_COLOR = "\033[0m";
+
     private String[] logo = {
             "  ____             _                  ___       _ _   _       _ _          ",
             " / ___| _ __  _ __(_)_ __   __ _     |_ _|_ __ (_) |_(_) __ _| (_)_____ __ ",
@@ -48,14 +59,17 @@ public class SpringInit {
         clearScreen();
         renderLoading();
         init();
-        clearScreen();
+        hideCursor();
+
+        Arrays.fill(this.previousSelection, 1);
+        renderUI();
+        Arrays.fill(this.previousSelection, 0);
 
         while (isRunning) {
-            renderUI();
             int key = readKey();
             handleKey(key);
-            clearScreen();
-            // IO.print(this.cursorY + " : " + this.cursorX + "\r\n");
+            renderUI();
+            IO.print(this.cursorY + " : " + this.cursorX + "\r\n");
         }
     }
 
@@ -64,6 +78,7 @@ public class SpringInit {
         this.cursorX = 0;
         this.cursorY = 0;
         this.menuGrid = new ArrayList<>();
+        this.previousSelection = new int[6];
         this.currentSelection = new int[6];
         this.mapper = new ObjectMapper();
 
@@ -72,6 +87,9 @@ public class SpringInit {
 
             if (Instant.now().getEpochSecond() - this.cache.timestamp() < 86400) {
                 this.data = this.cache.data();
+                // remove gradle-build and maven-build
+                this.data.type().values().remove(2);
+                this.data.type().values().remove(3);
             } else {
                 fetchSpringInitData();
             }
@@ -198,7 +216,7 @@ public class SpringInit {
     }
 
     private void clearScreen() {
-        System.out.print("\033[1J"); // clear screen
+        System.out.print("\033[2J"); // clear screen
         System.out.print("\033[H"); // reset cursor
     }
 
@@ -226,7 +244,7 @@ public class SpringInit {
             this.cursorX = newCol;
         }
 
-        // IO.print(this.cursorX + " : " + this.cursorY + "\r\n");
+        updateSelection();
     }
 
     private Direction getDirection(int key) {
@@ -248,6 +266,11 @@ public class SpringInit {
         }
     }
 
+    private void updateSelection() {
+        System.arraycopy(this.currentSelection, 0, this.previousSelection, 0, this.currentSelection.length);
+        this.currentSelection[this.cursorY] = this.cursorX;
+    }
+
     private void select() {
         IO.println("select");
     }
@@ -263,20 +286,17 @@ public class SpringInit {
         builder = renderLogo(builder);
 
         builder.append("\r\n");
-        builder.append("\r\n");
 
         builder.append("Loading metadata...");
         IO.print(builder);
+        IO.print("\033[2K");
     }
 
     private StringBuilder renderLogo(StringBuilder builder) {
-        String GREEN = "\033[38;2;109;179;63m";
-        String RESET = "\033[0m";
-
         for (String line : this.logo) {
             builder.append(GREEN)
                     .append(line.substring(0, 35))
-                    .append(RESET)
+                    .append(RESET_COLOR)
                     .append(line.substring(35))
                     .append("\r\n");
         }
@@ -285,114 +305,162 @@ public class SpringInit {
     }
 
     private void renderUI() {
-        String selected = "\u25CF"; // ●
-        String unselected = "\u25CB"; // ○
+        skipLogo();
 
         StringBuilder builder = new StringBuilder();
 
-        String GREEN = "\033[38;2;109;179;63m";
-        String RESET = "\033[0m";
+        builder = renderProject(builder);
+        builder = renderLanguage(builder);
+        builder = renderBootVersion(builder);
+        builder = renderProjectMetaData(builder);
+        builder = renderPackaging(builder);
+        builder = renderConfiguration(builder);
+        builder = renderJavaVersion(builder);
 
-        for (String line : this.logo) {
-            builder.append(GREEN)
-                    .append(line.substring(0, 35))
-                    .append(RESET)
-                    .append(line.substring(35))
-                    .append("\r\n");
-        }
-        builder.append("\r\n");
+        IO.print(builder);
+    }
 
-        builder.append("Project\r\n");
-        builder.append("\r\n");
+    private StringBuilder renderProject(StringBuilder builder) {
+        if (currentSelection[0] != previousSelection[0]) {
+            builder.append("Project\r\n");
+            builder.append("\r\n");
 
-        for (int i = 0; i < this.data.type().values().size(); i++) {
-            if (i == currentSelection[0]) {
-                builder.append(GREEN + selected + " " + this.data.type().values().get(i).name() + RESET + "  ");
-            } else {
-                builder.append(unselected + " " + this.data.type().values().get(i).name() + "  ");
+            for (int i = 0; i < this.data.type().values().size(); i++) {
+                if (i == currentSelection[0]) {
+                    if (this.cursorY == 0) {
+                        builder.append(UNDERLINED);
+                    }
+                    builder.append(GREEN + SELECTED + " ")
+                            .append(this.data.type().values().get(i).name())
+                            .append(RESET_COLOR + "  ");
+                    if (this.cursorY == 0) {
+                        builder.append(RESET_UNDERLINED);
+                    }
+                } else {
+                    builder.append(UNSELECTED + " " + this.data.type().values().get(i).name() + "  ");
+                }
             }
+        } else {
+            IO.print("\r\033[2B");
         }
 
         builder.append("\r\n");
         builder.append("\r\n");
 
+        return builder;
+    }
+
+    private StringBuilder renderLanguage(StringBuilder builder) {
         builder.append("Language\r\n");
         builder.append("\r\n");
 
         for (int i = 0; i < this.data.language().values().size(); i++) {
             if (i == currentSelection[1]) {
-                builder.append(GREEN + selected + " " + this.data.language().values().get(i).name() + RESET + "  ");
+                builder.append(
+                        GREEN + SELECTED + " " + this.data.language().values().get(i).name() + RESET_COLOR + "  ");
             } else {
-                builder.append(unselected + " " + this.data.language().values().get(i).name() + "  ");
+                builder.append(UNSELECTED + " " + this.data.language().values().get(i).name() + "  ");
             }
         }
 
         builder.append("\r\n");
         builder.append("\r\n");
 
+        return builder;
+    }
+
+    private StringBuilder renderBootVersion(StringBuilder builder) {
         builder.append("Spring Boot\r\n");
         builder.append("\r\n");
 
         for (int i = 0; i < this.data.bootVersion().values().size(); i++) {
             if (i == currentSelection[2]) {
-                builder.append(GREEN + selected + " " + this.data.bootVersion().values().get(i).name() + RESET + "  ");
+                builder.append(
+                        GREEN + SELECTED + " " + this.data.bootVersion().values().get(i).name() + RESET_COLOR + "  ");
             } else {
-                builder.append(unselected + " " + this.data.bootVersion().values().get(i).name() + "  ");
+                builder.append(UNSELECTED + " " + this.data.bootVersion().values().get(i).name() + "  ");
             }
         }
 
         builder.append("\r\n");
         builder.append("\r\n");
 
+        return builder;
+    }
+
+    private StringBuilder renderProjectMetaData(StringBuilder builder) {
         builder.append("Project Metadata\r\n");
         builder.append("\r\n");
-        builder.append("Group\r\n");
-        builder.append("Artifact\r\n");
-        builder.append("Package name\r\n");
-
+        builder.append("Group:\r\n");
+        builder.append("\r\n");
+        builder.append("Artifact:\r\n");
+        builder.append("\r\n");
+        builder.append("Package name:\r\n");
         builder.append("\r\n");
 
+        return builder;
+    }
+
+    private StringBuilder renderPackaging(StringBuilder builder) {
         builder.append("Packaging\r\n");
         builder.append("\r\n");
 
         for (int i = 0; i < this.data.packaging().values().size(); i++) {
             if (i == currentSelection[3]) {
-                builder.append(GREEN + selected + " " + this.data.packaging().values().get(i).name() + RESET + "  ");
+                builder.append(
+                        GREEN + SELECTED + " " + this.data.packaging().values().get(i).name() + RESET_COLOR + "  ");
             } else {
-                builder.append(unselected + " " + this.data.packaging().values().get(i).name() + "  ");
+                builder.append(UNSELECTED + " " + this.data.packaging().values().get(i).name() + "  ");
             }
         }
 
         builder.append("\r\n");
         builder.append("\r\n");
 
+        return builder;
+    }
+
+    private StringBuilder renderConfiguration(StringBuilder builder) {
         builder.append("Configuration\r\n");
         builder.append("\r\n");
 
         for (int i = 0; i < this.data.configurationFileFormat().values().size(); i++) {
             if (i == currentSelection[4]) {
-                builder.append(GREEN + selected + " " + this.data.configurationFileFormat().values().get(i).name()
-                        + RESET + "  ");
+                builder.append(GREEN + SELECTED + " " + this.data.configurationFileFormat().values().get(i).name()
+                        + RESET_COLOR + "  ");
             } else {
-                builder.append(unselected + " " + this.data.configurationFileFormat().values().get(i).name() + "  ");
+                builder.append(UNSELECTED + " " + this.data.configurationFileFormat().values().get(i).name() + "  ");
             }
         }
 
         builder.append("\r\n");
         builder.append("\r\n");
 
+        return builder;
+    }
+
+    private StringBuilder renderJavaVersion(StringBuilder builder) {
         builder.append("Java\r\n");
         builder.append("\r\n");
 
         for (int i = 0; i < this.data.javaVersion().values().size(); i++) {
             if (i == currentSelection[5]) {
-                builder.append(GREEN + selected + " " + this.data.javaVersion().values().get(i).name() + RESET + "  ");
+                builder.append(
+                        GREEN + SELECTED + " " + this.data.javaVersion().values().get(i).name() + RESET_COLOR + "  ");
             } else {
-                builder.append(unselected + " " + this.data.javaVersion().values().get(i).name() + "  ");
+                builder.append(UNSELECTED + " " + this.data.javaVersion().values().get(i).name() + "  ");
             }
         }
 
-        IO.print(builder);
+        return builder;
+    }
+
+    private void skipLogo() {
+        IO.print("\033[9;0H");
+    }
+
+    private void hideCursor() {
+        IO.print("\033[?25l");
     }
 
     // private void printMetaData(ObjectMapper mapper) {
