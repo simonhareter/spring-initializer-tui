@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.simonhareter.springinit.libc.Terminal;
+import org.simonhareter.springinit.util.CursorPosition;
 import org.simonhareter.springinit.util.Direction;
 import org.simonhareter.springinit.util.MetaData;
 import org.simonhareter.springinit.util.MetaDataCache;
@@ -34,9 +35,11 @@ public class SpringInit {
     private boolean isRunning;
     private int cursorX, cursorY;
     private int previousCursorX, previousCursorY;
+    private CursorPosition textCursorPos;
     private int[] previousSelection;
     private int[] currentSelection;
     private TextField group, artifact, packageName;
+    private boolean editing = false;
 
     private final String SELECTED = "\u25CF"; // ●
     private final String UNSELECTED = "\u25CB"; // ○
@@ -44,6 +47,8 @@ public class SpringInit {
     private final String RESET_UNDERLINED = "\033[24m";
     private final String GREEN = "\033[38;2;109;179;63m";
     private final String RESET_COLOR = "\033[0m";
+
+    private final int TEXT_START = 23;
 
     private String[] logo = {
             "  ____             _                  ___       _ _   _       _ _          ",
@@ -62,7 +67,7 @@ public class SpringInit {
         clearScreen();
         renderLoading();
         init();
-        // hideCursor();
+        hideCursor();
 
         Arrays.fill(this.previousSelection, 1);
         renderUI();
@@ -70,9 +75,10 @@ public class SpringInit {
 
         while (isRunning) {
             int key = readKey();
-            handleKey(key);
-            renderUI();
-            IO.print(this.cursorY + " : " + this.cursorX + "\r\n");
+            boolean shouldRender = handleKey(key);
+            if (shouldRender) {
+                renderUI();
+            }
         }
     }
 
@@ -206,12 +212,32 @@ public class SpringInit {
         }
     }
 
-    private void handleKey(int key) {
+    private boolean handleKey(int key) {
         switch (key) {
-            case 'q', -1, 3 -> quit();
-            case '\r', '\n', ' ' -> select();
-            case 'r' -> reset();
-            case 'D', 'h', 'B', 'j', 'A', 'k', 'C', 'l' -> move(key);
+            case 'q', -1, 3 -> {
+                quit();
+                return true;
+            }
+            case '\r', '\n', ' ' -> {
+                select();
+                return true;
+            }
+            case 'r' -> {
+                reset();
+                return true;
+            }
+            case 'D', 'h', 'C', 'l', 'B', 'j', 'A', 'k' -> {
+                move(key);
+                return true;
+            }
+            case 'i', 'e' -> {
+                this.editing = true;
+                writeTextField();
+                return true;
+            }
+            default -> {
+                return false;
+            }
         }
     }
 
@@ -248,8 +274,8 @@ public class SpringInit {
         this.previousCursorY = this.cursorY;
 
         this.cursorY = newRow;
-        if (newCol >= this.menuGrid.get(newRow).size()) {
-            this.cursorX = this.menuGrid.get(newRow).size() - 1;
+        if (newRow != previousCursorY) {
+            this.cursorX = currentSelection[newRow];
         } else {
             this.cursorX = newCol;
         }
@@ -282,7 +308,6 @@ public class SpringInit {
     }
 
     private void select() {
-        IO.println("select");
     }
 
     private void reset() {
@@ -314,22 +339,30 @@ public class SpringInit {
     }
 
     private void renderUI() {
+        hideCursor();
         skipLogo();
 
         StringBuilder builder = new StringBuilder();
 
-        builder = renderProject(builder);
-        builder = renderLanguage(builder);
-        builder = renderBootVersion(builder);
-        builder = renderProjectMetaData(builder);
-        builder = renderPackaging(builder);
-        builder = renderConfiguration(builder);
-        builder = renderJavaVersion(builder);
+        renderProject(builder);
+        renderLanguage(builder);
+        renderBootVersion(builder);
+        renderProjectMetaData(builder);
+        renderPackaging(builder);
+        renderConfiguration(builder);
+        renderJavaVersion(builder);
+        renderStatusBar(builder);
 
         IO.print(builder);
+        if (isTextFieldSelected()) {
+            positionTextCursor();
+            showCursor();
+        } else {
+            hideCursor();
+        }
     }
 
-    private StringBuilder renderSelectionRow(StringBuilder builder, String title, List<MetaDataOption> options,
+    private void renderSelectionRow(StringBuilder builder, String title, List<MetaDataOption> options,
             int selectionIndex) {
 
         boolean selectionChanged = currentSelection[selectionIndex] != previousSelection[selectionIndex];
@@ -347,8 +380,6 @@ public class SpringInit {
         }
 
         builder.append("\r\n\r\n");
-
-        return builder;
     }
 
     private void renderOptions(StringBuilder builder, List<MetaDataOption> options, int selectionIndex,
@@ -369,52 +400,50 @@ public class SpringInit {
                 builder.append(UNSELECTED + " ").append(options.get(i).name()).append("  ");
             }
         }
-
     }
 
-    private StringBuilder renderProject(StringBuilder builder) {
+    private void renderProject(StringBuilder builder) {
         int selectionIndex = 0;
-        return renderSelectionRow(builder, "Project", this.data.type().values(), selectionIndex);
+        renderSelectionRow(builder, "Project", this.data.type().values(), selectionIndex);
     }
 
-    private StringBuilder renderLanguage(StringBuilder builder) {
+    private void renderLanguage(StringBuilder builder) {
         int selectionIndex = 1;
-        return renderSelectionRow(builder, "Language", this.data.language().values(), selectionIndex);
+        renderSelectionRow(builder, "Language", this.data.language().values(), selectionIndex);
     }
 
-    private StringBuilder renderBootVersion(StringBuilder builder) {
+    private void renderBootVersion(StringBuilder builder) {
         int selectionIndex = 2;
-        return renderSelectionRow(builder, "Spring Boot", this.data.bootVersion().values(), selectionIndex);
+        renderSelectionRow(builder, "Spring Boot", this.data.bootVersion().values(), selectionIndex);
     }
 
-    private StringBuilder renderProjectMetaData(StringBuilder builder) {
-        builder.append("Project Metadata\r\n");
-        builder.append("\r\n");
+    private void renderProjectMetaData(StringBuilder builder) {
+        builder.append("Project Metadata\r\n\r\n");
 
-        writeTextField();
+        renderTextField(builder, "Group", this.group, 3);
+        renderTextField(builder, "Artifact", this.artifact, 4);
+        renderTextField(builder, "Package name", this.packageName, 5);
+    }
 
-        builder.append("Group: " + this.group.getText() + "\r\n");
-        builder.append("\r\n");
-        builder.append("Artifact: " + this.artifact.getText() + "\r\n");
-        builder.append("\r\n");
-        builder.append("Package name: " + formatPackageName() + "\r\n");
-        builder.append("\r\n");
+    private void renderTextField(StringBuilder builder, String title, TextField field, int selectionIndex) {
+        builder.append("\033[2K");
+        builder.append(String.format("    %-14s: ", title));
 
-        return builder;
+        if (selectionIndex == this.cursorY) {
+            builder.append("[ ");
+        }
+
+        builder.append(field.getText());
+
+        if (selectionIndex == this.cursorY) {
+            builder.append(" ]");
+        }
+
+        builder.append("\r\n\r\n");
     }
 
     private void writeTextField() {
-        saveCursor();
-
-        if (this.cursorY < 3 || this.cursorY > 5) {
-            return;
-        }
-
-        switch (this.cursorY) {
-            case 3 -> IO.print("\033[23;8H");
-            case 4 -> IO.print("\033[25;11H");
-            case 5 -> IO.print("\033[27;15H");
-        }
+        showCursor();
 
         boolean isWriting = true;
 
@@ -426,33 +455,103 @@ public class SpringInit {
                     isWriting = false;
                     move(key);
                 }
-                case 'C', 'D' -> moveCursor((char) key, 1);
-                case '\b', 127 -> IO.print("\b \b");
+                case 'C', 'D', 127 -> moveCursor(key, 1);
                 default -> {
-                    switch(this.cursorY) {
+                    switch (this.cursorY) {
                         case 3 -> {
-                            
+
+                        }
+                        case 4 -> {
+
+                        }
+                        case 5 -> {
+
                         }
                     }
                     IO.print((char) key);
                 }
             }
         }
+        hideCursor();
+    }
 
-        restoreCursor();
+    private boolean isTextFieldSelected() {
+        return this.cursorY >= 3 && this.cursorY <= 5;
+    }
+
+    private void positionTextCursor() {
+        switch (this.cursorY) {
+            case 3 -> IO.print("\033[23;" + TEXT_START + "H");
+            case 4 -> IO.print("\033[25;" + TEXT_START + "H");
+            case 5 -> IO.print("\033[27;" + TEXT_START + "H");
+        }
     }
 
     private String formatPackageName() {
         return this.group.getText() + "." + this.artifact.getText();
     }
 
-    private void moveCursor(char c, int distance) {
-        switch (c) {
+    private void moveCursor(int c, int distance) {
+        if (isIllegalCursorMove(c, distance)) {
+            return;
+        }
+
+        switch ((char) c) {
             case 'A' -> IO.print("\033[" + distance + c);
             case 'B' -> IO.print("\033[" + distance + c);
             case 'C' -> IO.print("\033[" + distance + c);
             case 'D' -> IO.print("\033[" + distance + c);
         }
+    }
+
+    private boolean isIllegalCursorMove(int c, int distance) {
+        this.textCursorPos = getCursorPosition();
+
+        switch (c) {
+            case 'D', 127 -> {
+                if (this.textCursorPos.col() <= TEXT_START) {
+                    return true;
+                }
+            }
+            case 'C' -> {
+                if (this.textCursorPos.col() >= TEXT_START + this.group.getText().length()) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private CursorPosition getCursorPosition() {
+        int row = 0, col = 0;
+        int c;
+
+        IO.print("\033[6n");
+        System.out.flush();
+
+        try {
+            if (System.in.read() != '\033') {
+                throw new IOException("Expected ESC character");
+            }
+
+            if (System.in.read() != '[') {
+                throw new IOException("Expected [");
+            }
+
+            while ((c = System.in.read()) != ';') {
+                row = row * 10 + (c - '0');
+            }
+
+            while ((c = System.in.read()) != 'R') {
+                col = col * 10 + (c - '0');
+            }
+
+        } catch (IOException e) {
+            IO.print(e);
+        }
+
+        return new CursorPosition(row - 1, col - 1);
     }
 
     private void saveCursor() {
@@ -463,20 +562,24 @@ public class SpringInit {
         IO.print("\033[u");
     }
 
-    private StringBuilder renderPackaging(StringBuilder builder) {
+    private void renderPackaging(StringBuilder builder) {
         int selectionIndex = 6;
-        return renderSelectionRow(builder, "Packaging", this.data.packaging().values(), selectionIndex);
+        renderSelectionRow(builder, "Packaging", this.data.packaging().values(), selectionIndex);
     }
 
-    private StringBuilder renderConfiguration(StringBuilder builder) {
+    private void renderConfiguration(StringBuilder builder) {
         int selectionIndex = 7;
-        return renderSelectionRow(builder, "Configuration", this.data.configurationFileFormat().values(),
+        renderSelectionRow(builder, "Configuration", this.data.configurationFileFormat().values(),
                 selectionIndex);
     }
 
-    private StringBuilder renderJavaVersion(StringBuilder builder) {
+    private void renderJavaVersion(StringBuilder builder) {
         int selectionIndex = 8;
-        return renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
+        renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
+    }
+
+    private void renderStatusBar(StringBuilder builder) {
+
     }
 
     private void skipLogo() {
@@ -485,6 +588,10 @@ public class SpringInit {
 
     private void hideCursor() {
         IO.print("\033[?25l");
+    }
+
+    private void showCursor() {
+        IO.print("\033[?25h");
     }
 
     // private void printMetaData(ObjectMapper mapper) {

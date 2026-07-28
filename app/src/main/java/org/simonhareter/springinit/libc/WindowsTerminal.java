@@ -3,6 +3,7 @@ package org.simonhareter.springinit.libc;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.sun.jna.Structure;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.win32.StdCallLibrary;
 
@@ -46,6 +47,15 @@ public class WindowsTerminal implements Terminal {
 
         Pointer outHandle = Kernel32.INSTANCE.GetStdHandle(Kernel32.STD_OUTPUT_HANDLE);
         Kernel32.INSTANCE.SetConsoleMode(outHandle, outMode.getValue());
+    }
+
+    @Override
+    public WindowSize getWindowSize() {
+        final Kernel32.CONSOLE_SCREEN_BUFFER_INFO info = new Kernel32.CONSOLE_SCREEN_BUFFER_INFO();
+        final Kernel32 instance = Kernel32.INSTANCE;
+        final Pointer handle = Kernel32.INSTANCE.GetStdHandle(Kernel32.STD_OUTPUT_HANDLE);
+        instance.GetConsoleScreenBufferInfo(handle, info);
+        return new WindowSize(info.windowHeight(), info.windowWidth());
     }
 
     interface Kernel32 extends StdCallLibrary {
@@ -92,6 +102,14 @@ public class WindowsTerminal implements Terminal {
         int STD_INPUT_HANDLE = -10;
         int DISABLE_NEWLINE_AUTO_RETURN = 0x0008;
 
+        // BOOL WINAPI GetConsoleScreenBufferInfo(
+        // _In_ HANDLE hConsoleOutput,
+        // _Out_ PCONSOLE_SCREEN_BUFFER_INFO lpConsoleScreenBufferInfo);
+        void GetConsoleScreenBufferInfo(
+                Pointer in_hConsoleOutput,
+                CONSOLE_SCREEN_BUFFER_INFO out_lpConsoleScreenBufferInfo)
+                throws LastErrorException;
+
         void GetConsoleMode(
                 Pointer in_hConsoleOutput,
                 IntByReference out_lpMode)
@@ -102,5 +120,103 @@ public class WindowsTerminal implements Terminal {
                 int in_dwMode) throws LastErrorException;
 
         Pointer GetStdHandle(int nStdHandle);
+
+        // typedef struct _CONSOLE_SCREEN_BUFFER_INFO {
+        // COORD dwSize;
+        // COORD dwCursorPosition;
+        // WORD wAttributes;
+        // SMALL_RECT srWindow;
+        // COORD dwMaximumWindowSize;
+        // } CONSOLE_SCREEN_BUFFER_INFO;
+        class CONSOLE_SCREEN_BUFFER_INFO extends Structure {
+
+            public COORD dwSize;
+            public COORD dwCursorPosition;
+            public short wAttributes;
+            public SMALL_RECT srWindow;
+            public COORD dwMaximumWindowSize;
+
+            private static String[] fieldOrder = { "dwSize", "dwCursorPosition", "wAttributes", "srWindow",
+                    "dwMaximumWindowSize" };
+
+            @Override
+            protected java.util.List<String> getFieldOrder() {
+                return java.util.Arrays.asList(fieldOrder);
+            }
+
+            public int windowWidth() {
+                return this.srWindow.width() + 1;
+            }
+
+            public int windowHeight() {
+                return this.srWindow.height() + 1;
+            }
+        }
+
+        // typedef struct _COORD {
+        // SHORT X;
+        // SHORT Y;
+        // } COORD, *PCOORD;
+        class COORD extends Structure implements Structure.ByValue {
+            public COORD() {
+            }
+
+            public COORD(short X, short Y) {
+                this.X = X;
+                this.Y = Y;
+            }
+
+            public short X;
+            public short Y;
+
+            private static String[] fieldOrder = { "X", "Y" };
+
+            @Override
+            protected java.util.List<String> getFieldOrder() {
+                return java.util.Arrays.asList(fieldOrder);
+            }
+        }
+
+        // typedef struct _SMALL_RECT {
+        // SHORT Left;
+        // SHORT Top;
+        // SHORT Right;
+        // SHORT Bottom;
+        // } SMALL_RECT;
+        class SMALL_RECT extends Structure {
+            public SMALL_RECT() {
+            }
+
+            public SMALL_RECT(SMALL_RECT org) {
+                this(org.Top, org.Left, org.Bottom, org.Right);
+            }
+
+            public SMALL_RECT(short Top, short Left, short Bottom, short Right) {
+                this.Top = Top;
+                this.Left = Left;
+                this.Bottom = Bottom;
+                this.Right = Right;
+            }
+
+            public short Left;
+            public short Top;
+            public short Right;
+            public short Bottom;
+
+            private static String[] fieldOrder = { "Left", "Top", "Right", "Bottom" };
+
+            @Override
+            protected java.util.List<String> getFieldOrder() {
+                return java.util.Arrays.asList(fieldOrder);
+            }
+
+            public short width() {
+                return (short) (this.Right - this.Left);
+            }
+
+            public short height() {
+                return (short) (this.Bottom - this.Top);
+            }
+        }
     }
 }
