@@ -13,9 +13,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import org.simonhareter.springinit.dtos.MetaData;
-import org.simonhareter.springinit.dtos.MetaDataCache;
 import org.simonhareter.springinit.libc.Terminal;
+import org.simonhareter.springinit.util.Direction;
+import org.simonhareter.springinit.util.MetaData;
+import org.simonhareter.springinit.util.MetaDataCache;
+import org.simonhareter.springinit.util.MetaDataOption;
+import org.simonhareter.springinit.util.TextField;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -25,7 +28,7 @@ public class SpringInit {
     private ObjectMapper mapper;
     private MetaData data;
     private MetaDataCache cache;
-    private Path cacheFile = Path.of("cache.json");
+    private final Path cacheFile = Path.of("cache.json");
     private List<List<Integer>> menuGrid;
 
     private boolean isRunning;
@@ -33,7 +36,7 @@ public class SpringInit {
     private int previousCursorX, previousCursorY;
     private int[] previousSelection;
     private int[] currentSelection;
-    private String group, artifact, packageName;
+    private TextField group, artifact, packageName;
 
     private final String SELECTED = "\u25CF"; // ●
     private final String UNSELECTED = "\u25CB"; // ○
@@ -59,7 +62,7 @@ public class SpringInit {
         clearScreen();
         renderLoading();
         init();
-        hideCursor();
+        // hideCursor();
 
         Arrays.fill(this.previousSelection, 1);
         renderUI();
@@ -78,8 +81,8 @@ public class SpringInit {
         this.cursorX = 0;
         this.cursorY = 0;
         this.menuGrid = new ArrayList<>();
-        this.previousSelection = new int[6];
-        this.currentSelection = new int[6];
+        this.previousSelection = new int[9];
+        this.currentSelection = new int[9];
         this.mapper = new ObjectMapper();
 
         if (Files.exists(cacheFile)) {
@@ -96,6 +99,10 @@ public class SpringInit {
         } else {
             fetchSpringInitData();
         }
+
+        this.group = new TextField(this.data.groupId().defaultValue());
+        this.artifact = new TextField(this.data.artifactId().defaultValue());
+        this.packageName = new TextField(this.data.packageName().defaultValue());
 
         fillMenuGrid();
 
@@ -237,6 +244,9 @@ public class SpringInit {
             return;
         }
 
+        this.previousCursorX = this.cursorX;
+        this.previousCursorY = this.cursorY;
+
         this.cursorY = newRow;
         if (newCol >= this.menuGrid.get(newRow).size()) {
             this.cursorX = this.menuGrid.get(newRow).size() - 1;
@@ -283,7 +293,7 @@ public class SpringInit {
 
     private void renderLoading() {
         StringBuilder builder = new StringBuilder();
-        builder = renderLogo(builder);
+        renderLogo(builder);
 
         builder.append("\r\n");
 
@@ -292,16 +302,15 @@ public class SpringInit {
         IO.print("\033[2K");
     }
 
-    private StringBuilder renderLogo(StringBuilder builder) {
+    private void renderLogo(StringBuilder builder) {
         for (String line : this.logo) {
             builder.append(GREEN)
-                    .append(line.substring(0, 35))
+                    .append(line, 0, 35)
                     .append(RESET_COLOR)
                     .append(line.substring(35))
                     .append("\r\n");
         }
         builder.append("\r\n");
-        return builder;
     }
 
     private void renderUI() {
@@ -320,139 +329,154 @@ public class SpringInit {
         IO.print(builder);
     }
 
-    private StringBuilder renderProject(StringBuilder builder) {
-        if (currentSelection[0] != previousSelection[0]) {
-            builder.append("Project\r\n");
-            builder.append("\r\n");
+    private StringBuilder renderSelectionRow(StringBuilder builder, String title, List<MetaDataOption> options,
+            int selectionIndex) {
 
-            for (int i = 0; i < this.data.type().values().size(); i++) {
-                if (i == currentSelection[0]) {
-                    if (this.cursorY == 0) {
-                        builder.append(UNDERLINED);
-                    }
-                    builder.append(GREEN + SELECTED + " ")
-                            .append(this.data.type().values().get(i).name())
-                            .append(RESET_COLOR + "  ");
-                    if (this.cursorY == 0) {
-                        builder.append(RESET_UNDERLINED);
-                    }
-                } else {
-                    builder.append(UNSELECTED + " " + this.data.type().values().get(i).name() + "  ");
-                }
-            }
+        boolean selectionChanged = currentSelection[selectionIndex] != previousSelection[selectionIndex];
+        boolean isPreviousRow = this.previousCursorY == selectionIndex;
+        boolean isUnderlined = this.cursorY == selectionIndex;
+
+        if (selectionChanged || cursorY == selectionIndex) {
+            builder.append(title).append("\r\n\r\n");
+            renderOptions(builder, options, selectionIndex, isUnderlined);
+        } else if (isPreviousRow) {
+            builder.append(title).append("\r\n\r\n");
+            renderOptions(builder, options, selectionIndex, false);
         } else {
-            IO.print("\r\033[2B");
+            builder.append("\r\033[2B");
         }
 
-        builder.append("\r\n");
-        builder.append("\r\n");
+        builder.append("\r\n\r\n");
 
         return builder;
+    }
+
+    private void renderOptions(StringBuilder builder, List<MetaDataOption> options, int selectionIndex,
+            boolean isUnderlined) {
+
+        for (int i = 0; i < options.size(); i++) {
+            if (i == currentSelection[selectionIndex]) {
+                if (isUnderlined) {
+                    builder.append(UNDERLINED);
+                }
+                builder.append(GREEN + SELECTED + " ")
+                        .append(options.get(i).name())
+                        .append(RESET_COLOR + "  ");
+                if (isUnderlined) {
+                    builder.append(RESET_UNDERLINED);
+                }
+            } else {
+                builder.append(UNSELECTED + " ").append(options.get(i).name()).append("  ");
+            }
+        }
+
+    }
+
+    private StringBuilder renderProject(StringBuilder builder) {
+        int selectionIndex = 0;
+        return renderSelectionRow(builder, "Project", this.data.type().values(), selectionIndex);
     }
 
     private StringBuilder renderLanguage(StringBuilder builder) {
-        builder.append("Language\r\n");
-        builder.append("\r\n");
-
-        for (int i = 0; i < this.data.language().values().size(); i++) {
-            if (i == currentSelection[1]) {
-                builder.append(
-                        GREEN + SELECTED + " " + this.data.language().values().get(i).name() + RESET_COLOR + "  ");
-            } else {
-                builder.append(UNSELECTED + " " + this.data.language().values().get(i).name() + "  ");
-            }
-        }
-
-        builder.append("\r\n");
-        builder.append("\r\n");
-
-        return builder;
+        int selectionIndex = 1;
+        return renderSelectionRow(builder, "Language", this.data.language().values(), selectionIndex);
     }
 
     private StringBuilder renderBootVersion(StringBuilder builder) {
-        builder.append("Spring Boot\r\n");
-        builder.append("\r\n");
-
-        for (int i = 0; i < this.data.bootVersion().values().size(); i++) {
-            if (i == currentSelection[2]) {
-                builder.append(
-                        GREEN + SELECTED + " " + this.data.bootVersion().values().get(i).name() + RESET_COLOR + "  ");
-            } else {
-                builder.append(UNSELECTED + " " + this.data.bootVersion().values().get(i).name() + "  ");
-            }
-        }
-
-        builder.append("\r\n");
-        builder.append("\r\n");
-
-        return builder;
+        int selectionIndex = 2;
+        return renderSelectionRow(builder, "Spring Boot", this.data.bootVersion().values(), selectionIndex);
     }
 
     private StringBuilder renderProjectMetaData(StringBuilder builder) {
         builder.append("Project Metadata\r\n");
         builder.append("\r\n");
-        builder.append("Group:\r\n");
+
+        writeTextField();
+
+        builder.append("Group: " + this.group.getText() + "\r\n");
         builder.append("\r\n");
-        builder.append("Artifact:\r\n");
+        builder.append("Artifact: " + this.artifact.getText() + "\r\n");
         builder.append("\r\n");
-        builder.append("Package name:\r\n");
+        builder.append("Package name: " + formatPackageName() + "\r\n");
         builder.append("\r\n");
 
         return builder;
+    }
+
+    private void writeTextField() {
+        saveCursor();
+
+        if (this.cursorY < 3 || this.cursorY > 5) {
+            return;
+        }
+
+        switch (this.cursorY) {
+            case 3 -> IO.print("\033[23;8H");
+            case 4 -> IO.print("\033[25;11H");
+            case 5 -> IO.print("\033[27;15H");
+        }
+
+        boolean isWriting = true;
+
+        while (isWriting) {
+            int key = readKey();
+
+            switch (key) {
+                case 'A', 'B' -> {
+                    isWriting = false;
+                    move(key);
+                }
+                case 'C', 'D' -> moveCursor((char) key, 1);
+                case '\b', 127 -> IO.print("\b \b");
+                default -> {
+                    switch(this.cursorY) {
+                        case 3 -> {
+                            
+                        }
+                    }
+                    IO.print((char) key);
+                }
+            }
+        }
+
+        restoreCursor();
+    }
+
+    private String formatPackageName() {
+        return this.group.getText() + "." + this.artifact.getText();
+    }
+
+    private void moveCursor(char c, int distance) {
+        switch (c) {
+            case 'A' -> IO.print("\033[" + distance + c);
+            case 'B' -> IO.print("\033[" + distance + c);
+            case 'C' -> IO.print("\033[" + distance + c);
+            case 'D' -> IO.print("\033[" + distance + c);
+        }
+    }
+
+    private void saveCursor() {
+        IO.print("\033[s");
+    }
+
+    private void restoreCursor() {
+        IO.print("\033[u");
     }
 
     private StringBuilder renderPackaging(StringBuilder builder) {
-        builder.append("Packaging\r\n");
-        builder.append("\r\n");
-
-        for (int i = 0; i < this.data.packaging().values().size(); i++) {
-            if (i == currentSelection[3]) {
-                builder.append(
-                        GREEN + SELECTED + " " + this.data.packaging().values().get(i).name() + RESET_COLOR + "  ");
-            } else {
-                builder.append(UNSELECTED + " " + this.data.packaging().values().get(i).name() + "  ");
-            }
-        }
-
-        builder.append("\r\n");
-        builder.append("\r\n");
-
-        return builder;
+        int selectionIndex = 6;
+        return renderSelectionRow(builder, "Packaging", this.data.packaging().values(), selectionIndex);
     }
 
     private StringBuilder renderConfiguration(StringBuilder builder) {
-        builder.append("Configuration\r\n");
-        builder.append("\r\n");
-
-        for (int i = 0; i < this.data.configurationFileFormat().values().size(); i++) {
-            if (i == currentSelection[4]) {
-                builder.append(GREEN + SELECTED + " " + this.data.configurationFileFormat().values().get(i).name()
-                        + RESET_COLOR + "  ");
-            } else {
-                builder.append(UNSELECTED + " " + this.data.configurationFileFormat().values().get(i).name() + "  ");
-            }
-        }
-
-        builder.append("\r\n");
-        builder.append("\r\n");
-
-        return builder;
+        int selectionIndex = 7;
+        return renderSelectionRow(builder, "Configuration", this.data.configurationFileFormat().values(),
+                selectionIndex);
     }
 
     private StringBuilder renderJavaVersion(StringBuilder builder) {
-        builder.append("Java\r\n");
-        builder.append("\r\n");
-
-        for (int i = 0; i < this.data.javaVersion().values().size(); i++) {
-            if (i == currentSelection[5]) {
-                builder.append(
-                        GREEN + SELECTED + " " + this.data.javaVersion().values().get(i).name() + RESET_COLOR + "  ");
-            } else {
-                builder.append(UNSELECTED + " " + this.data.javaVersion().values().get(i).name() + "  ");
-            }
-        }
-
-        return builder;
+        int selectionIndex = 8;
+        return renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
     }
 
     private void skipLogo() {

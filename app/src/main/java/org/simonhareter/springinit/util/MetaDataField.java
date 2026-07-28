@@ -1,4 +1,4 @@
-package org.simonhareter.springinit.dtos;
+package org.simonhareter.springinit.util;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;

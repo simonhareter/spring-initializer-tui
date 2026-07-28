@@ -1,4 +1,4 @@
-package org.simonhareter.springinit;
+package org.simonhareter.springinit.util;
 
 public enum Direction {
     UP,

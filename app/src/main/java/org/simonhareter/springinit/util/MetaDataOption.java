@@ -1,4 +1,4 @@
-package org.simonhareter.springinit.dtos;
+package org.simonhareter.springinit.util;
 
 public record MetaDataOption(
         String id,

@@ -1,7 +1,5 @@
 package org.simonhareter.springinit.libc;
 
-import org.simonhareter.springinit.LibC;
-
 public class MacTerminal implements Terminal {
     private static LibC.Termios originalAttributes;
 
