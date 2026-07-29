@@ -1,13 +1,17 @@
 package org.simonhareter.springinit.util;
 
 public class TextField {
-    private char[] text;
+    private String text;
 
     public TextField(String text) {
-        this.text = text.toCharArray();
+        this.text = text;
     }
 
-	public String getText() {
-		return String.valueOf(this.text);
-	}
+    public String getText() {
+        return this.text;
+    }
+
+    public void setText(String text) {
+        this.text = text;
+    }
 }

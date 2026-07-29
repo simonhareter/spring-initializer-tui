@@ -50,7 +50,7 @@ public class SpringInit {
     private final String GREEN = "\033[38;2;109;179;63m";
     private final String RESET_COLOR = "\033[0m";
 
-    private final int TEXT_START = 25;
+    private final int TEXT_START = 26;
 
     private String[] logo = {
             "  ____             _                  ___       _ _   _       _ _          ",
@@ -445,7 +445,7 @@ public class SpringInit {
 
         renderTextField(builder, "Group", this.group, 3);
         renderTextField(builder, "Artifact", this.artifact, 4);
-        renderTextField(builder, "Package name", this.packageName, 5);
+        renderTextField(builder, "Package name", formatPackageName(), 5);
     }
 
     private void renderTextField(StringBuilder builder, String title, TextField field, int selectionIndex) {
@@ -453,13 +453,13 @@ public class SpringInit {
         builder.append(String.format("    - %-14s: ", title));
 
         if (selectionIndex == this.cursorY) {
-            builder.append("[ ");
+            builder.append("[  ");
         }
 
         builder.append(field.getText());
 
         if (selectionIndex == this.cursorY) {
-            builder.append(" ]");
+            builder.append("  ]");
         }
 
         builder.append("\r\n\r\n");
@@ -467,6 +467,9 @@ public class SpringInit {
 
     private void writeTextField() {
         showCursor();
+
+        StringBuilder builder = new StringBuilder(getSelectedText(this.cursorY));
+        int cursorIdx = 0;
 
         while (this.isEditing) {
             int key = readKey();
@@ -476,24 +479,67 @@ public class SpringInit {
                     this.isEditing = false;
                     move(key);
                 }
-                case 'C', 'D', 127 -> moveCursor(key);
-                default -> {
-                    switch (this.cursorY) {
-                        case 3 -> {
-
-                        }
-                        case 4 -> {
-
-                        }
-                        case 5 -> {
-
-                        }
+                case 'C', 'D' -> {
+                    int result = moveCursor(key, cursorIdx);
+                    if (result != -1) {
+                        cursorIdx = result;
                     }
-                    IO.print((char) key);
+                }
+                case 127 -> cursorIdx = deleteChar(builder, cursorIdx);
+                default -> {
                 }
             }
         }
         hideCursor();
+    }
+
+    private int deleteChar(StringBuilder builder, int cursorIdx) {
+        if (cursorIdx == builder.length() && cursorIdx > 0) {
+            builder.deleteCharAt(cursorIdx - 1);
+            cursorIdx--;
+            IO.print("\033[1D");
+        } else if (cursorIdx > 0 && cursorIdx < builder.length()) {
+            builder.deleteCharAt(cursorIdx - 1);
+            cursorIdx--;
+            IO.print("\033[1D");
+        }
+
+        applyEdit(builder);
+
+        return cursorIdx;
+    }
+
+    private void applyEdit(StringBuilder builder) {
+        switch (this.cursorY) {
+            case 3 -> {
+                this.group.setText(builder.toString());
+            }
+            case 4 -> {
+                this.artifact.setText(builder.toString());
+            }
+            default -> {
+                this.packageName.setText(builder.toString());
+            }
+        }
+
+        renderEdit(builder);
+    }
+
+    private void renderEdit(StringBuilder builder) {
+        saveCursor();
+        positionTextCursor();
+        IO.print("\033[0K");
+        IO.print(builder);
+        IO.print("  ]");
+        restoreCursor();
+    }
+
+    private String getSelectedText(int index) {
+        return switch (index) {
+            case 3 -> this.group.getText();
+            case 4 -> this.artifact.getText();
+            default -> this.packageName.getText();
+        };
     }
 
     private boolean isTextFieldSelected() {
@@ -508,36 +554,56 @@ public class SpringInit {
         }
     }
 
-    private String formatPackageName() {
-        return this.group.getText() + "." + this.artifact.getText();
+    private TextField formatPackageName() {
+        if (this.group.getText().isEmpty() && this.artifact.getText().isEmpty()) {
+            this.packageName.setText(".");
+        } else {
+            this.packageName.setText(this.group.getText() + "." + this.artifact.getText());
+        }
+
+        return this.packageName;
     }
 
-    private void moveCursor(int c) {
+    private int moveCursor(int c, int cursorIdx) {
         if (isIllegalCursorMove(c)) {
-            return;
+            return -1;
         }
 
         switch ((char) c) {
-            case 'A' -> IO.print("\033[" + c);
-            case 'B' -> IO.print("\033[" + c);
-            case 'C' -> IO.print("\033[" + c);
-            case 'D' -> IO.print("\033[" + c);
+            case 'A' -> IO.print("\033[1A");
+            case 'B' -> IO.print("\033[1B");
+            case 'C' -> {
+                IO.print("\033[1C");
+                cursorIdx++;
+            }
+            case 'D' -> {
+                IO.print("\033[1D");
+                cursorIdx--;
+            }
         }
+        debug(cursorIdx);
+        return cursorIdx;
     }
 
     private boolean isIllegalCursorMove(int c) {
         this.textCursorPos = getCursorPosition();
-        IO.print(c);
+
+        int textLength = 0;
+
+        switch (this.cursorY) {
+            case 3 -> textLength = this.group.getText().length() - 1;
+            case 4 -> textLength = this.artifact.getText().length() - 1;
+            case 5 -> textLength = this.packageName.getText().length() - 1;
+        }
 
         switch (c) {
-            case 'D', 127 -> {
-                if (this.textCursorPos.col() <= TEXT_START) {
+            case 'D' -> {
+                if (this.textCursorPos.col() <= TEXT_START - 1) {
                     return true;
                 }
             }
             case 'C' -> {
-                if (this.textCursorPos.col() >= TEXT_START + this.group.getText().length()) {
-                    IO.print("not the end");
+                if (this.textCursorPos.col() >= TEXT_START + textLength) {
                     return true;
                 }
             }
@@ -641,6 +707,13 @@ public class SpringInit {
 
     private void showCursor() {
         IO.print("\033[?25h");
+    }
+
+    private <T> void debug(T value) {
+        saveCursor();
+        IO.print("\033[" + String.valueOf(this.rows) + ";0H");
+        IO.print(value);
+        restoreCursor();
     }
 
     // private void printMetaData(ObjectMapper mapper) {
