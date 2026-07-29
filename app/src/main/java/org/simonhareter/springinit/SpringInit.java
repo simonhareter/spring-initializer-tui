@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import org.simonhareter.springinit.libc.Terminal;
+import org.simonhareter.springinit.libc.WindowSize;
 import org.simonhareter.springinit.util.CursorPosition;
 import org.simonhareter.springinit.util.Direction;
 import org.simonhareter.springinit.util.MetaData;
@@ -32,14 +33,15 @@ public class SpringInit {
     private final Path cacheFile = Path.of("cache.json");
     private List<List<Integer>> menuGrid;
 
-    private boolean isRunning;
+    private int rows, columns;
+
+    private boolean isRunning, isEditing;
     private int cursorX, cursorY;
     private int previousCursorX, previousCursorY;
     private CursorPosition textCursorPos;
     private int[] previousSelection;
     private int[] currentSelection;
     private TextField group, artifact, packageName;
-    private boolean editing = false;
 
     private final String SELECTED = "\u25CF"; // ●
     private final String UNSELECTED = "\u25CB"; // ○
@@ -48,7 +50,7 @@ public class SpringInit {
     private final String GREEN = "\033[38;2;109;179;63m";
     private final String RESET_COLOR = "\033[0m";
 
-    private final int TEXT_START = 23;
+    private final int TEXT_START = 25;
 
     private String[] logo = {
             "  ____             _                  ___       _ _   _       _ _          ",
@@ -64,6 +66,7 @@ public class SpringInit {
     }
 
     public void start() {
+        enterAlternateBuffer();
         clearScreen();
         renderLoading();
         init();
@@ -71,6 +74,7 @@ public class SpringInit {
 
         Arrays.fill(this.previousSelection, 1);
         renderUI();
+        renderStatusBar();
         Arrays.fill(this.previousSelection, 0);
 
         while (isRunning) {
@@ -78,8 +82,21 @@ public class SpringInit {
             boolean shouldRender = handleKey(key);
             if (shouldRender) {
                 renderUI();
+                renderStatusBar();
             }
         }
+
+        leaveAlternateBuffer();
+    }
+
+    private void enterAlternateBuffer() {
+        IO.print("\033[?47h");
+        IO.print("\033[?1049h");
+    }
+
+    private void leaveAlternateBuffer() {
+        IO.print("\033[?47l");
+        IO.print("\033[?1049l");
     }
 
     private void init() {
@@ -106,6 +123,9 @@ public class SpringInit {
             fetchSpringInitData();
         }
 
+        IO.print("\033[2K");
+        IO.print("\033[0G");
+
         this.group = new TextField(this.data.groupId().defaultValue());
         this.artifact = new TextField(this.data.artifactId().defaultValue());
         this.packageName = new TextField(this.data.packageName().defaultValue());
@@ -113,6 +133,10 @@ public class SpringInit {
         fillMenuGrid();
 
         terminal.enableRawMode();
+
+        WindowSize windowSize = this.terminal.getWindowSize();
+        this.rows = windowSize.rows();
+        this.columns = windowSize.columns();
     }
 
     private void fetchSpringInitData() {
@@ -200,6 +224,10 @@ public class SpringInit {
                 return key;
             }
 
+            if (System.in.available() == 0) {
+                return '\033';
+            }
+
             int key2 = System.in.read();
             if (key2 != '[' && key2 != 'O') {
                 return key2;
@@ -218,10 +246,6 @@ public class SpringInit {
                 quit();
                 return true;
             }
-            case '\r', '\n', ' ' -> {
-                select();
-                return true;
-            }
             case 'r' -> {
                 reset();
                 return true;
@@ -230,8 +254,12 @@ public class SpringInit {
                 move(key);
                 return true;
             }
-            case 'i', 'e' -> {
-                this.editing = true;
+            case 'i', 'e', '\r', '\n' -> {
+                if ((key == '\r' || key == '\n') && !isTextFieldSelected()) {
+                    return false;
+                }
+                this.isEditing = true;
+                renderStatusBar();
                 writeTextField();
                 return true;
             }
@@ -307,9 +335,6 @@ public class SpringInit {
         this.currentSelection[this.cursorY] = this.cursorX;
     }
 
-    private void select() {
-    }
-
     private void reset() {
         IO.println("reset");
         this.cursorX = 0;
@@ -324,7 +349,6 @@ public class SpringInit {
 
         builder.append("Loading metadata...");
         IO.print(builder);
-        IO.print("\033[2K");
     }
 
     private void renderLogo(StringBuilder builder) {
@@ -351,7 +375,6 @@ public class SpringInit {
         renderPackaging(builder);
         renderConfiguration(builder);
         renderJavaVersion(builder);
-        renderStatusBar(builder);
 
         IO.print(builder);
         if (isTextFieldSelected()) {
@@ -427,7 +450,7 @@ public class SpringInit {
 
     private void renderTextField(StringBuilder builder, String title, TextField field, int selectionIndex) {
         builder.append("\033[2K");
-        builder.append(String.format("    %-14s: ", title));
+        builder.append(String.format("    - %-14s: ", title));
 
         if (selectionIndex == this.cursorY) {
             builder.append("[ ");
@@ -445,17 +468,15 @@ public class SpringInit {
     private void writeTextField() {
         showCursor();
 
-        boolean isWriting = true;
-
-        while (isWriting) {
+        while (this.isEditing) {
             int key = readKey();
 
             switch (key) {
-                case 'A', 'B' -> {
-                    isWriting = false;
+                case 'A', 'B', '\033', '\r', '\n' -> {
+                    this.isEditing = false;
                     move(key);
                 }
-                case 'C', 'D', 127 -> moveCursor(key, 1);
+                case 'C', 'D', 127 -> moveCursor(key);
                 default -> {
                     switch (this.cursorY) {
                         case 3 -> {
@@ -491,21 +512,22 @@ public class SpringInit {
         return this.group.getText() + "." + this.artifact.getText();
     }
 
-    private void moveCursor(int c, int distance) {
-        if (isIllegalCursorMove(c, distance)) {
+    private void moveCursor(int c) {
+        if (isIllegalCursorMove(c)) {
             return;
         }
 
         switch ((char) c) {
-            case 'A' -> IO.print("\033[" + distance + c);
-            case 'B' -> IO.print("\033[" + distance + c);
-            case 'C' -> IO.print("\033[" + distance + c);
-            case 'D' -> IO.print("\033[" + distance + c);
+            case 'A' -> IO.print("\033[" + c);
+            case 'B' -> IO.print("\033[" + c);
+            case 'C' -> IO.print("\033[" + c);
+            case 'D' -> IO.print("\033[" + c);
         }
     }
 
-    private boolean isIllegalCursorMove(int c, int distance) {
+    private boolean isIllegalCursorMove(int c) {
         this.textCursorPos = getCursorPosition();
+        IO.print(c);
 
         switch (c) {
             case 'D', 127 -> {
@@ -515,6 +537,7 @@ public class SpringInit {
             }
             case 'C' -> {
                 if (this.textCursorPos.col() >= TEXT_START + this.group.getText().length()) {
+                    IO.print("not the end");
                     return true;
                 }
             }
@@ -578,8 +601,34 @@ public class SpringInit {
         renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
     }
 
-    private void renderStatusBar(StringBuilder builder) {
+    private void renderStatusBar() {
+        saveCursor();
 
+        StringBuilder builder = new StringBuilder();
+
+        String mode, hints = "↑↓ Navigate   ←→ Change   Enter Edit   Esc Back   Ctrl+C Exit";
+
+        if (this.isEditing) {
+            mode = "INSERT";
+        } else {
+            mode = "NORMAL";
+        }
+
+        int spaces = this.columns - mode.length() - hints.length();
+
+        builder.append("\033[" + String.valueOf(this.rows - 1) + ";0H");
+        builder.append(mode);
+
+        if (spaces < 1) {
+            builder.append(" ");
+        } else {
+            builder.append(" ".repeat(spaces));
+        }
+
+        builder.append(hints);
+
+        IO.print(builder);
+        restoreCursor();
     }
 
     private void skipLogo() {
