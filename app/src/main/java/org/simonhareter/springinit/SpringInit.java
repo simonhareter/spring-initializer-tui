@@ -42,6 +42,7 @@ public class SpringInit {
     private int[] previousSelection;
     private int[] currentSelection;
     private TextField group, artifact, packageName;
+    private boolean updatePackageName;
 
     private final String SELECTED = "\u25CF"; // ●
     private final String UNSELECTED = "\u25CB"; // ○
@@ -487,10 +488,19 @@ public class SpringInit {
                 }
                 case 127 -> cursorIdx = deleteChar(builder, cursorIdx);
                 default -> {
+                    cursorIdx = writeText(builder, cursorIdx, key);
                 }
             }
         }
         hideCursor();
+    }
+
+    private int writeText(StringBuilder builder, int cursorIdx, int key) {
+        builder.insert(cursorIdx, (char) key);
+        cursorIdx++;
+        IO.print("\033[1C");
+        applyEdit(builder);
+        return cursorIdx;
     }
 
     private int deleteChar(StringBuilder builder, int cursorIdx) {
@@ -513,16 +523,19 @@ public class SpringInit {
         switch (this.cursorY) {
             case 3 -> {
                 this.group.setText(builder.toString());
+                this.updatePackageName = true;
             }
             case 4 -> {
                 this.artifact.setText(builder.toString());
+                this.updatePackageName = true;
             }
             default -> {
                 this.packageName.setText(builder.toString());
+                this.updatePackageName = false;
             }
         }
 
-        renderEdit(builder);
+                renderEdit(builder);
     }
 
     private void renderEdit(StringBuilder builder) {
@@ -555,12 +568,9 @@ public class SpringInit {
     }
 
     private TextField formatPackageName() {
-        if (this.group.getText().isEmpty() && this.artifact.getText().isEmpty()) {
-            this.packageName.setText(".");
-        } else {
+        if (updatePackageName) {
             this.packageName.setText(this.group.getText() + "." + this.artifact.getText());
         }
-
         return this.packageName;
     }
 
@@ -581,7 +591,7 @@ public class SpringInit {
                 cursorIdx--;
             }
         }
-        debug(cursorIdx);
+
         return cursorIdx;
     }
 
