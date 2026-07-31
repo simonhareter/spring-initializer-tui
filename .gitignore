@@ -2,6 +2,10 @@ biome.json
 metadata.json
 cache.json
 
+.settings/org.eclipse.buildship.core.prefs
+app/.classpath
+app/.settings/org.eclipse.buildship.core.prefs
+
 # Ignore Gradle project-specific cache directory
 .gradle
 .settings/
