@@ -2,104 +2,164 @@ package org.simonhareter.springinit.libc;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
+import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
-import java.util.Arrays;
+import com.sun.jna.Memory;
 
 public class MacTerminal implements Terminal {
-    private static LibC.Termios originalAttributes;
 
-    @Override
-    public void enableRawMode() {
-        LibC.Termios termios = new LibC.Termios();
-        int rc = LibC.INSTANCE.tcgetattr(LibC.SYSTEM_OUT_FD, termios);
+  private int ttyFd = -1;
+  private LibC.Termios originalAttributes;
 
-        if (rc != 0) {
-            System.err.println("There was a problem calling tcgetattr");
-            System.exit(rc);
-        }
+  @Override
+  public void enableRawMode() {
 
-        originalAttributes = LibC.Termios.of(termios);
+    ttyFd = LibC.INSTANCE.open("/dev/tty", LibC.O_RDWR);
 
-        termios.c_lflag &= ~(LibC.ECHO | LibC.ICANON | LibC.IEXTEN | LibC.ISIG);
-        termios.c_iflag &= ~(LibC.IXON | LibC.ICRNL);
-        termios.c_oflag &= ~(LibC.OPOST);
-
-        /*
-         * termios.c_cc[LibC.VMIN] = 0;
-         * termios.c_cc[LibC.VTIME] = 1;
-         */
-
-        LibC.INSTANCE.tcsetattr(LibC.SYSTEM_OUT_FD, LibC.TCSAFLUSH, termios);
+    if (ttyFd == -1) {
+      throw new RuntimeException("Unable to open /dev/tty");
     }
 
-    @Override
-    public void disableRawMode() {
-        LibC.INSTANCE.tcsetattr(LibC.SYSTEM_OUT_FD, LibC.TCSAFLUSH, originalAttributes);
+    LibC.Termios termios = new LibC.Termios();
+
+    if (LibC.INSTANCE.tcgetattr(ttyFd, termios) != 0) {
+      throw new RuntimeException("tcgetattr failed");
     }
 
-    @Override
-    public WindowSize getWindowSize() {
-        final LibC.Winsize winsize = new LibC.Winsize();
+    originalAttributes = LibC.Termios.copyOf(termios);
 
-        final int rc = LibC.INSTANCE.ioctl(LibC.SYSTEM_OUT_FD, LibC.TIOCGWINSZ, winsize);
+    termios.c_lflag.setValue(
+        termios.c_lflag.longValue()
+            & ~(LibC.ECHO | LibC.ICANON | LibC.IEXTEN | LibC.ISIG));
 
-        if (rc != 0) {
-            System.err.println("ioctl failed with return code[={}]" + rc);
-            System.exit(1);
-        }
+    termios.c_iflag.setValue(
+        termios.c_iflag.longValue()
+            & ~(LibC.IXON | LibC.ICRNL));
 
-        return new WindowSize(winsize.ws_row, winsize.ws_col);
+    termios.c_oflag.setValue(
+        termios.c_oflag.longValue()
+            & ~(LibC.OPOST));
+
+    termios.c_cc[LibC.VMIN] = 1;
+    termios.c_cc[LibC.VTIME] = 0;
+
+    if (LibC.INSTANCE.tcsetattr(ttyFd, LibC.TCSAFLUSH, termios) != 0) {
+      throw new RuntimeException("tcsetattr failed");
+    }
+  }
+
+  @Override
+  public void disableRawMode() {
+
+    if (ttyFd == -1)
+      return;
+
+    LibC.INSTANCE.tcsetattr(ttyFd, LibC.TCSAFLUSH, originalAttributes);
+    LibC.INSTANCE.close(ttyFd);
+    ttyFd = -1;
+  }
+
+  @Override
+  public WindowSize getWindowSize() {
+    Memory mem = new Memory(8);
+
+    int ioctlRc = LibC.INSTANCE.ioctl(
+        ttyFd,
+        LibC.TIOCGWINSZ,
+        mem);
+
+    if (ioctlRc != 0) {
+      throw new RuntimeException(
+          "ioctl(TIOCGWINSZ) failed errno=" + Native.getLastError());
     }
 
-    interface LibC extends Library {
-        int SYSTEM_OUT_FD = 0;
-        int ISIG = 1, ICANON = 2, ECHO = 10, TCSAFLUSH = 2,
-                IXON = 2000, ICRNL = 400, IEXTEN = 100000, OPOST = 1, VMIN = 6, VTIME = 5, TIOCGWINSZ = 0x40087468;
+    short rows = mem.getShort(0);
+    short cols = mem.getShort(2);
 
-        // we're loading the C standard library for POSIX systems
-        LibC INSTANCE = Native.load("c", LibC.class);
+    return new WindowSize(rows, cols);
+  }
 
-        @Structure.FieldOrder(value = { "ws_row", "ws_col", "ws_xpixel", "ws_ypixel" })
-        class Winsize extends Structure {
-            public short ws_row, ws_col, ws_xpixel, ws_ypixel;
-        }
+  interface LibC extends Library {
 
-        @Structure.FieldOrder(value = { "c_iflag", "c_oflag", "c_cflag", "c_lflag", "c_cc" })
-        class Termios extends Structure {
-            public int c_iflag, c_oflag, c_cflag, c_lflag;
+    LibC INSTANCE = Native.load("c", LibC.class);
 
-            public byte[] c_cc = new byte[19];
+    long ISIG = 0x00000080L;
+    long ICANON = 0x00000100L;
+    long ECHO = 0x00000008L;
+    long IEXTEN = 0x00000400L;
+    long IXON = 0x00000200L;
+    long ICRNL = 0x00000100L;
+    long OPOST = 0x00000001L;
 
-            public Termios() {
-            }
+    int VMIN = 16;
+    int VTIME = 17;
 
-            public static Termios of(Termios t) {
-                Termios copy = new Termios();
-                copy.c_iflag = t.c_iflag;
-                copy.c_oflag = t.c_oflag;
-                copy.c_cflag = t.c_cflag;
-                copy.c_lflag = t.c_lflag;
-                copy.c_cc = t.c_cc.clone();
-                return copy;
-            }
+    int TCSAFLUSH = 2;
+    long TIOCGWINSZ = 0x40087468L;
+    int O_RDWR = 0x0002;
 
-            @Override
-            public String toString() {
-                return "Termios{" +
-                        "c_iflag=" + c_iflag +
-                        ", c_oflag=" + c_oflag +
-                        ", c_cflag=" + c_cflag +
-                        ", c_lflag=" + c_lflag +
-                        ", c_cc=" + Arrays.toString(c_cc) +
-                        '}';
-            }
-        }
+    @Structure.FieldOrder({
+        "c_iflag",
+        "c_oflag",
+        "c_cflag",
+        "c_lflag",
+        "c_cc",
+        "c_ispeed",
+        "c_ospeed"
+    })
+    class Termios extends Structure {
 
-        int tcgetattr(int fd, Termios termios);
+      public NativeLong c_iflag = new NativeLong();
+      public NativeLong c_oflag = new NativeLong();
+      public NativeLong c_cflag = new NativeLong();
+      public NativeLong c_lflag = new NativeLong();
 
-        int tcsetattr(int fd, int optional_actions,
-                Termios termios);
+      public byte[] c_cc = new byte[20];
 
-        int ioctl(int fd, int opt, Winsize winsize);
+      public NativeLong c_ispeed = new NativeLong();
+      public NativeLong c_ospeed = new NativeLong();
+
+      static Termios copyOf(Termios t) {
+
+        Termios c = new Termios();
+
+        c.c_iflag.setValue(t.c_iflag.longValue());
+        c.c_oflag.setValue(t.c_oflag.longValue());
+        c.c_cflag.setValue(t.c_cflag.longValue());
+        c.c_lflag.setValue(t.c_lflag.longValue());
+
+        c.c_ispeed.setValue(t.c_ispeed.longValue());
+        c.c_ospeed.setValue(t.c_ospeed.longValue());
+
+        c.c_cc = t.c_cc.clone();
+
+        return c;
+      }
     }
+
+    @Structure.FieldOrder({
+        "ws_row",
+        "ws_col",
+        "ws_xpixel",
+        "ws_ypixel"
+    })
+    public static class Winsize extends Structure {
+      public short ws_row;
+      public short ws_col;
+      public short ws_xpixel;
+      public short ws_ypixel;
+    }
+
+    int open(String path, int flags);
+
+    int close(int fd);
+
+    int tcgetattr(int fd, Termios termios);
+
+    int tcsetattr(int fd, int action, Termios termios);
+
+    int ioctl(int fd, long request, Object... args);
+
+    int isatty(int fd);
+  }
 }
