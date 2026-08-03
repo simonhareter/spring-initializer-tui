@@ -36,6 +36,7 @@ public class SpringInit {
     private final List<List<Integer>> menuGrid;
     private final int[] previousSelection;
     private final int[] currentSelection;
+    private final String version = "0.0.1";
 
     private MetaData data;
     private MetaDataCache cache;
@@ -59,6 +60,7 @@ public class SpringInit {
     private TextField group, artifact, packageName;
     private boolean updatePackageName;
     private Dialog dependencyDialog;
+    private boolean isDimmed;
 
     private final String SELECTED = "\u25CF"; // ●
     private final String UNSELECTED = "\u25CB"; // ○
@@ -67,6 +69,9 @@ public class SpringInit {
     private final String GREEN = "\033[38;2;109;179;63m";
     private final String RED = "\033[38;2;220;50;47m";
     private final String BG = "\033[48;2;21;21;31m";
+    private final String BG_DIMMED = "\033[48;2;10;10;20m";
+    private final String DIMMED = "\033[2m";
+    private final String RESET_DIMMED = "\033[22m";
     private final String BUTTON_BG_SELECTED = "\033[48;2;50;80;30m";
     private final String BUTTON_BG_UNSELECTED = "\033[48;2;33;33;48m";
     private final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
@@ -94,6 +99,7 @@ public class SpringInit {
     public void start() {
         clearScreen();
         enterAlternateBuffer();
+        renderLogo();
         renderLoading();
         init();
         hideCursor();
@@ -543,10 +549,6 @@ public class SpringInit {
                 quit();
                 return true;
             }
-            case 'r' -> {
-                reset();
-                return true;
-            }
             case 'D', 'h', 'C', 'l', 'B', 'j', 'A', 'k' -> {
                 move(key);
                 return true;
@@ -665,31 +667,43 @@ public class SpringInit {
         }
     }
 
-    private void reset() {
-        IO.println("reset");
-        this.cursorX = 0;
-        this.cursorY = 0;
-    }
-
     private void renderLoading() {
         StringBuilder builder = new StringBuilder();
-        renderLogo(builder);
-
-        builder.append("\r\n");
-
         builder.append("Loading metadata...");
         IO.print(builder);
     }
 
-    private void renderLogo(StringBuilder builder) {
+    private void renderLogo() {
+        StringBuilder builder = new StringBuilder();
+
+        builder.append("\033[H");
+
         for (String line : this.logo) {
+
+            if (this.isDimmed) {
+                builder.append(BG_DIMMED)
+                        .append(DIMMED);
+            }
+
             builder.append(GREEN)
                     .append(line, 0, 35)
-                    .append(RESET_COLOR)
-                    .append(line.substring(35))
+                    .append(RESET_COLOR);
+
+            if (this.isDimmed) {
+                builder.append(BG_DIMMED)
+                        .append(DIMMED);
+                ;
+            }
+
+            builder.append(line.substring(35))
                     .append("\r\n");
         }
-        builder.append("\r\n");
+
+        builder.append("\r\n\r\n")
+                .append(RESET_BUTTON_BG)
+                .append(RESET_DIMMED);
+
+        IO.print(builder);
     }
 
     private void renderUI() {
@@ -726,6 +740,11 @@ public class SpringInit {
         boolean isPreviousRow = this.previousCursorY == selectionIndex;
         boolean isUnderlined = this.cursorY == selectionIndex;
 
+        if (this.isDimmed) {
+            builder.append(BG_DIMMED)
+                    .append(DIMMED);
+        }
+
         if (this.firstRender || selectionChanged || cursorY == selectionIndex) {
             builder.append(title).append("\r\n\r\n");
             renderOptions(builder, options, selectionIndex, isUnderlined);
@@ -737,6 +756,10 @@ public class SpringInit {
         }
 
         builder.append("\r\n\r\n");
+
+        if (this.isDimmed) {
+            builder.append(RESET_DIMMED);
+        }
     }
 
     private void renderOptions(StringBuilder builder, List<MetaDataOption> options, int selectionIndex,
@@ -750,7 +773,15 @@ public class SpringInit {
 
                 builder.append(GREEN + SELECTED + " ")
                         .append(options.get(i).name())
-                        .append(RESET_COLOR + "  ");
+                        .append(RESET_COLOR);
+
+                if (isDimmed) {
+                    builder.append(BG_DIMMED)
+                            .append(DIMMED)
+                            .append("  ");
+                } else {
+                    builder.append("  ");
+                }
 
                 if (isUnderlined) {
                     builder.append(RESET_UNDERLINED);
@@ -777,15 +808,25 @@ public class SpringInit {
     }
 
     private void renderProjectMetaData(StringBuilder builder) {
+        if (isDimmed) {
+            builder.append(BG_DIMMED)
+                    .append(DIMMED);
+        }
+
         builder.append("Project Metadata\r\n\r\n");
 
         renderTextField(builder, "Group", this.group, 3);
         renderTextField(builder, "Artifact", this.artifact, 4);
         renderTextField(builder, "Package name", formatPackageName(), 5);
+
+        if (isDimmed) {
+            builder.append(RESET_DIMMED);
+        }
     }
 
     private void renderTextField(StringBuilder builder, String title, TextField field, int selectionIndex) {
         builder.append("\033[2K");
+
         builder.append(String.format("    - %-14s: ", title));
 
         if (selectionIndex == this.cursorY) {
@@ -1013,6 +1054,11 @@ public class SpringInit {
     }
 
     private void renderAddDependencies(StringBuilder builder) {
+        if (this.isDimmed) {
+            builder.append(BG_DIMMED)
+                    .append(DIMMED);
+        }
+
         builder.append("\r\n");
 
         if (this.cursorY == 9) {
@@ -1026,9 +1072,18 @@ public class SpringInit {
 
         builder.append(RESET_BUTTON_BG)
                 .append("\r\n");
+
+        if (this.isDimmed) {
+            builder.append(RESET_DIMMED);
+        }
     }
 
     private void renderGenerateButton(StringBuilder builder) {
+        if (this.isDimmed) {
+            builder.append(BG_DIMMED)
+                    .append(DIMMED);
+        }
+
         builder.append("\r\n");
 
         if (this.cursorY == 10) {
@@ -1041,19 +1096,24 @@ public class SpringInit {
         }
 
         builder.append(RESET_BUTTON_BG);
+
+        if (this.isDimmed) {
+            builder.append(RESET_DIMMED);
+        }
     }
 
     private void addDependencies() {
         saveCursor();
 
         this.isAddDependencyRunning = true;
+        renderDialogBackGround();
         renderDialog();
 
         while (isAddDependencyRunning) {
             int key = readKey();
 
             switch (key) {
-                case 'q' -> {
+                case 'q', '\033' -> {
                     isAddDependencyRunning = false;
                 }
             }
@@ -1065,30 +1125,64 @@ public class SpringInit {
         restoreCursor();
     }
 
-    private void renderDialog() {
-        StringBuilder builder = new StringBuilder();
+    private void renderDialogBackGround() {
+        StringBuilder builderDimmed = new StringBuilder();
 
-        builder.append("\033[H");
+        builderDimmed.append("\033[H");
+
+        // Dim entire terminal
+        for (int row = 1; row <= this.rows; row++) {
+            builderDimmed.append("\033[")
+                    .append(row)
+                    .append(";1H");
+
+            builderDimmed.append(BG_DIMMED)
+                    .append(" ".repeat(this.columns));
+        }
+
+        IO.print(builderDimmed);
+
+        this.isDimmed = true;
+        renderLogo();
+        this.firstRender = true;
+        renderUI();
+        renderStatusBar();
+        this.isDimmed = false;
+    }
+
+    private void renderDialog() {
+        StringBuilder builderDialog = new StringBuilder();
 
         for (int row = 0; row < dependencyDialog.getHeight(); row++) {
-            builder.append("\033[")
+            builderDialog.append("\033[")
                     .append(this.dependencyDialog.getY() + row)
                     .append(";")
                     .append(this.dependencyDialog.getX())
                     .append("H");
 
-            builder.append(BUTTON_BG_SELECTED)
+            builderDialog.append(BG)
                     .append(" ".repeat(this.dependencyDialog.getWidth()))
                     .append(RESET_BUTTON_BG);
         }
 
-        IO.print(builder);
+        IO.print(builderDialog);
     }
 
     private void removeDialog() {
         StringBuilder builder = new StringBuilder();
 
         builder.append("\033[H");
+
+        // undim entire terminal
+        for (int row = 1; row <= this.rows; row++) {
+            builder.append("\033[")
+                    .append(row)
+                    .append(";1H");
+
+            builder.append(BG)
+                    .append(" ".repeat(this.columns))
+                    .append(RESET_BUTTON_BG);
+        }
 
         for (int row = 0; row < dependencyDialog.getHeight(); row++) {
             builder.append("\033[")
@@ -1104,7 +1198,9 @@ public class SpringInit {
 
         IO.print(builder);
         this.firstRender = true;
+        renderLogo();
         renderUI();
+        renderStatusBar();
     }
 
     private void renderStatusBar() {
@@ -1112,7 +1208,13 @@ public class SpringInit {
 
         StringBuilder builder = new StringBuilder();
 
-        String mode, hints = "↑↓ Navigate   ←→ Change   Enter Edit   Esc Back   Ctrl+C Exit";
+        if (isDimmed) {
+            builder.append(BG_DIMMED)
+                    .append(DIMMED);
+        }
+
+        String mode, hints = "↑↓ Navigate   ←→ Change   Enter Edit   Esc Back   Ctrl+C Exit",
+                v = "   v" + this.version;
 
         if (this.isEditing) {
             mode = "INSERT";
@@ -1120,7 +1222,7 @@ public class SpringInit {
             mode = "NORMAL";
         }
 
-        int spaces = this.columns - mode.length() - hints.length();
+        int spaces = this.columns - mode.length() - hints.length() - v.length();
 
         builder.append("\033[" + String.valueOf(this.rows - 1) + ";0H");
         builder.append(mode);
@@ -1131,7 +1233,12 @@ public class SpringInit {
             builder.append(" ".repeat(spaces));
         }
 
-        builder.append(hints);
+        builder.append(hints)
+                .append(v);
+
+        if (isDimmed) {
+            builder.append(RESET_DIMMED);
+        }
 
         IO.print(builder);
         restoreCursor();
