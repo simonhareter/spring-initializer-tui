@@ -33,12 +33,15 @@ public class SpringInit {
     private ObjectMapper mapper;
     private MetaData data;
     private MetaDataCache cache;
+    private MetaDataConfig config;
     private final Path cacheFile = Path.of("cache.json");
+    private final Path configFile = Path.of("config.json");
     private List<List<Integer>> menuGrid;
 
     private int rows, columns;
 
     private boolean isRunning, isEditing;
+    private boolean firstRender;
     private int cursorX, cursorY;
     private int previousCursorX, previousCursorY;
     private CursorPosition textCursorPos;
@@ -79,10 +82,9 @@ public class SpringInit {
         init();
         hideCursor();
 
-        Arrays.fill(this.previousSelection, 1);
+        this.firstRender = true;
         renderUI();
         renderStatusBar();
-        Arrays.fill(this.previousSelection, 0);
 
         while (isRunning) {
             int key = readKey();
@@ -94,7 +96,7 @@ public class SpringInit {
         }
 
         leaveAlternateBuffer();
-          System.exit(0);
+        System.exit(0);
     }
 
     private void enterAlternateBuffer() {
@@ -116,21 +118,19 @@ public class SpringInit {
         this.currentSelection = new int[10];
         this.mapper = new ObjectMapper();
 
-        if (Files.exists(cacheFile)) {
-            this.cache = mapper.readValue(cacheFile.toFile(), MetaDataCache.class);
+        terminal.enableRawMode();
 
-            if (Instant.now().getEpochSecond() - this.cache.timestamp() < 86400) {
-                this.data = this.cache.data();
-                // remove gradle-build and maven-build
-                this.data.type().values().remove(2);
-                this.data.type().values().remove(3);
-            } else {
-                fetchSpringInitData();
-            }
+        WindowSize windowSize = this.terminal.getWindowSize();
+        this.rows = windowSize.rows();
+        this.columns = windowSize.columns();
+
+        if (isCacheValid()) {
+            loadFromCache();
         } else {
             fetchSpringInitData();
         }
 
+        // remove renderLoading text;
         IO.print("\033[2K");
         IO.print("\033[0G");
 
@@ -138,13 +138,31 @@ public class SpringInit {
         this.artifact = new TextField(this.data.artifactId().defaultValue());
         this.packageName = new TextField(this.data.packageName().defaultValue());
 
+        if (doesConfigExist()) {
+            loadConfig();
+        }
+
         fillMenuGrid();
+    }
 
-        terminal.enableRawMode();
+    private boolean isCacheValid() {
+        if (Files.exists(this.cacheFile)) {
+            this.cache = mapper.readValue(this.cacheFile.toFile(), MetaDataCache.class);
 
-        WindowSize windowSize = this.terminal.getWindowSize();
-        this.rows = windowSize.rows();
-        this.columns = windowSize.columns();
+            if (Instant.now().getEpochSecond() - this.cache.timestamp() < 86400) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void loadFromCache() {
+        this.data = this.cache.data();
+
+        // remove gradle-build and maven-build
+        this.data.type().values().remove(2);
+        this.data.type().values().remove(3);
     }
 
     private void fetchSpringInitData() {
@@ -180,6 +198,39 @@ public class SpringInit {
         } catch (IOException e) {
             IO.println("IOException: " + e.getMessage());
         }
+    }
+
+    private void loadConfig() {
+        this.config = this.mapper.readValue(this.configFile.toFile(), MetaDataConfig.class);
+
+        this.currentSelection[0] = getSelectionIndex(this.data.type().values(), this.config.type());
+        this.currentSelection[1] = getSelectionIndex(this.data.language().values(), this.config.language());
+        this.currentSelection[2] = getSelectionIndex(this.data.bootVersion().values(), this.config.bootVersion());
+
+        this.group.setText(this.config.project().group());
+        this.artifact.setText(this.config.project().artifact());
+        this.packageName.setText(this.config.project().packageName());
+
+        this.currentSelection[6] = getSelectionIndex(this.data.packaging().values(), this.config.packaging());
+        this.currentSelection[7] = getSelectionIndex(this.data.configurationFileFormat().values(),
+                this.config.configurationFileFormat());
+        this.currentSelection[8] = getSelectionIndex(this.data.javaVersion().values(), this.config.javaVersion());
+
+        // debug(Arrays.toString(this.currentSelection));
+    }
+
+    private int getSelectionIndex(List<MetaDataOption> options, String value) {
+        for (int i = 0; i < options.size(); i++) {
+            if (options.get(i).name().equals(value)) {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    private boolean doesConfigExist() {
+        return Files.exists(this.configFile);
     }
 
     private void generateProject() {
@@ -414,6 +465,8 @@ public class SpringInit {
         renderGenerateButton(builder);
 
         IO.print(builder);
+        this.firstRender = false;
+
         if (isTextFieldSelected()) {
             positionTextCursor();
             showCursor();
@@ -429,7 +482,7 @@ public class SpringInit {
         boolean isPreviousRow = this.previousCursorY == selectionIndex;
         boolean isUnderlined = this.cursorY == selectionIndex;
 
-        if (selectionChanged || cursorY == selectionIndex) {
+        if (this.firstRender || selectionChanged || cursorY == selectionIndex) {
             builder.append(title).append("\r\n\r\n");
             renderOptions(builder, options, selectionIndex, isUnderlined);
         } else if (isPreviousRow) {

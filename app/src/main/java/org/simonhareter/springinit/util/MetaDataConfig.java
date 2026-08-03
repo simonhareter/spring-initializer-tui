@@ -6,6 +6,6 @@ public record MetaDataConfig(
         String bootVersion,
         Project project,
         String packaging,
-        String configuration,
-        String java) {
+        String configurationFileFormat,
+        String javaVersion) {
 }
