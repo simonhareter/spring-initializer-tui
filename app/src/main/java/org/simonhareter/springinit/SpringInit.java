@@ -26,6 +26,7 @@ import org.simonhareter.springinit.util.MetaDataCache;
 import org.simonhareter.springinit.util.MetaDataConfig;
 import org.simonhareter.springinit.util.MetaDataOption;
 import org.simonhareter.springinit.util.Project;
+import org.simonhareter.springinit.util.SectionLayout;
 import org.simonhareter.springinit.util.TextField;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -51,16 +52,27 @@ public class SpringInit {
     private WindowSize windowSize;
     private int rows, columns;
 
-    private boolean isRunning, isEditing, isPostGenMenuRunning, isAddDependencyRunning;
-    private int postGenMenuIndex;
-    private boolean firstRender;
-    private int cursorX, cursorY;
-    private int previousCursorY;
+    private boolean isRunning, isEditing, isPostGenMenuRunning, isAddDependencyRunning, updatePackageName, isDimmed,
+            firstRender;
+    private int postGenMenuIndex = 0;
+
+    // Cursor position inside the menu grid
+    private int cursorX = 0, cursorY = 0, previousCursorY;
+
+    // Virtual cursor position
+    private int contentHeight = 0, scrollOffset = 0, scrollCursorY = 10, viewPortHeight, statusBarHeight = 1,
+            debugHeight = 1;
+    private final int SCROLL_MARGIN = 5;
+    private int logoHeight = 8, projectHeight = 4, languageHeight = 4, bootVersionHeight = 4, projectMetaDataHeight = 8,
+            packagingHeight = 4,
+            configurationHeight = 4, javaVersionHeight = 4,
+            addDepHeight = 2, generateHeight = 1, postGenHeight = 3;
+    private SectionLayout logoL, project, language, bootVersion, projectMetaData, packaging, configuration, javaVersion,
+            addDep, generate, postGen;
+
     private CursorPosition textCursorPos;
     private TextField group, artifact, packageName;
-    private boolean updatePackageName;
     private Dialog dependencyDialog;
-    private boolean isDimmed;
 
     private final String SELECTED = "\u25CF"; // ●
     private final String UNSELECTED = "\u25CB"; // ○
@@ -97,18 +109,16 @@ public class SpringInit {
     }
 
     public void start() {
-        clearScreen();
         enterAlternateBuffer();
-        renderLogo();
         renderLoading();
         init();
+        renderLogo();
         hideCursor();
-
-        this.firstRender = true;
         renderUI();
         renderStatusBar();
+        calculateContentHeight();
 
-        while (isRunning) {
+        while (this.isRunning) {
             int key = readKey();
             boolean shouldRender = handleKey(key);
             if (shouldRender) {
@@ -133,14 +143,15 @@ public class SpringInit {
 
     private void init() {
         this.isRunning = true;
-        this.cursorX = 0;
-        this.cursorY = 0;
+        this.firstRender = true;
 
         terminal.enableRawMode();
 
         this.windowSize = this.terminal.getWindowSize();
         this.rows = this.windowSize.rows();
         this.columns = this.windowSize.columns();
+
+        this.viewPortHeight = this.rows - this.statusBarHeight - this.debugHeight;
 
         int width = (int) (this.columns * 0.8);
         int height = (int) (this.rows * 0.8);
@@ -157,9 +168,7 @@ public class SpringInit {
             fetchSpringInitData();
         }
 
-        // remove renderLoading text;
-        IO.print("\033[2K");
-        IO.print("\033[0G");
+        debug("");
 
         this.group = new TextField(this.data.groupId().defaultValue());
         this.artifact = new TextField(this.data.artifactId().defaultValue());
@@ -170,6 +179,45 @@ public class SpringInit {
         }
 
         fillMenuGrid();
+    }
+
+    private void calculateContentHeight() {
+        int row = 0;
+
+        this.logoL = new SectionLayout(row, this.logoHeight);
+        row += this.logoL.height();
+
+        this.project = new SectionLayout(row, this.projectHeight);
+        row += this.project.height();
+
+        this.language = new SectionLayout(row, this.languageHeight);
+        row += this.language.height();
+
+        this.bootVersion = new SectionLayout(row, this.bootVersionHeight);
+        row += this.bootVersion.height();
+
+        this.projectMetaData = new SectionLayout(row, this.projectMetaDataHeight);
+        row += this.projectMetaData.height();
+
+        this.packaging = new SectionLayout(row, this.packagingHeight);
+        row += this.packaging.height();
+
+        this.configuration = new SectionLayout(row, this.configurationHeight);
+        row += this.configuration.height();
+
+        this.javaVersion = new SectionLayout(row, this.javaVersionHeight);
+        row += this.javaVersion.height();
+
+        this.addDep = new SectionLayout(row, this.addDepHeight);
+        row += this.addDep.height();
+
+        this.generate = new SectionLayout(row, this.generateHeight);
+        row += this.generate.height();
+
+        this.postGen = new SectionLayout(row, this.postGenHeight);
+        row += this.postGen.height();
+
+        this.contentHeight = row;
     }
 
     private boolean isCacheValid() {
@@ -540,7 +588,6 @@ public class SpringInit {
             IO.println("Error reading key");
             return -1;
         }
-
     }
 
     private boolean handleKey(int key) {
@@ -616,8 +663,11 @@ public class SpringInit {
         } else {
             this.cursorX = newCol;
         }
-
         updateSelection();
+    }
+
+    private void updateScrollCursorY() {
+
     }
 
     private Direction getDirection(int key) {
@@ -670,7 +720,7 @@ public class SpringInit {
     private void renderLoading() {
         StringBuilder builder = new StringBuilder();
         builder.append("Loading metadata...");
-        IO.print(builder);
+        debug(builder);
     }
 
     private void renderLogo() {
@@ -697,6 +747,7 @@ public class SpringInit {
 
             builder.append(line.substring(35))
                     .append("\r\n");
+
         }
 
         builder.append("\r\n\r\n")
@@ -794,16 +845,19 @@ public class SpringInit {
 
     private void renderProject(StringBuilder builder) {
         int selectionIndex = 0;
+
         renderSelectionRow(builder, "Project", this.data.type().values(), selectionIndex);
     }
 
     private void renderLanguage(StringBuilder builder) {
         int selectionIndex = 1;
+
         renderSelectionRow(builder, "Language", this.data.language().values(), selectionIndex);
     }
 
     private void renderBootVersion(StringBuilder builder) {
         int selectionIndex = 2;
+
         renderSelectionRow(builder, "Spring Boot", this.data.bootVersion().values(), selectionIndex);
     }
 
@@ -1039,17 +1093,20 @@ public class SpringInit {
 
     private void renderPackaging(StringBuilder builder) {
         int selectionIndex = 6;
+
         renderSelectionRow(builder, "Packaging", this.data.packaging().values(), selectionIndex);
     }
 
     private void renderConfiguration(StringBuilder builder) {
         int selectionIndex = 7;
+
         renderSelectionRow(builder, "Configuration", this.data.configurationFileFormat().values(),
                 selectionIndex);
     }
 
     private void renderJavaVersion(StringBuilder builder) {
         int selectionIndex = 8;
+
         renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
     }
 
@@ -1258,9 +1315,25 @@ public class SpringInit {
 
     private <T> void debug(T value) {
         saveCursor();
-        IO.print("\033[2K");
-        IO.print("\033[" + String.valueOf(this.rows) + ";0H");
-        IO.print(value);
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("\033[" + String.valueOf(this.rows) + ";0H")
+                .append("\033[2K");
+
+        if (this.isDimmed) {
+            builder.append(BG_DIMMED)
+                    .append(DIMMED);
+        }
+
+        builder.append(" ".repeat(this.columns));
+
+        builder.append("\033[" + String.valueOf(this.rows) + ";0H");
+
+        builder.append(value);
+
+        builder.append(RESET_DIMMED);
+
+        IO.print(builder);
         restoreCursor();
     }
 
