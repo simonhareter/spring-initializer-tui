@@ -1,6 +1,5 @@
 package org.simonhareter.springinit;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -8,12 +7,15 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import org.simonhareter.springinit.libc.Terminal;
 import org.simonhareter.springinit.libc.WindowSize;
 import org.simonhareter.springinit.util.CursorPosition;
@@ -34,16 +36,21 @@ public class SpringInit {
     private MetaData data;
     private MetaDataCache cache;
     private MetaDataConfig config;
-    private final Path cacheFile = Path.of("cache.json");
-    private final Path configFile = Path.of("config.json");
     private List<List<Integer>> menuGrid;
+
+    private final Path home = Path.of(System.getProperty("user.home"));
+    private final Path configDir = this.home.resolve(".config").resolve("spring-initializr-tui");
+    private final Path cacheDir = this.home.resolve(".cache").resolve("spring-initializr-tui");
+    private final Path configFile = this.configDir.resolve("config.json");
+    private final Path cacheFile = this.cacheDir.resolve("cache.json");
 
     private int rows, columns;
 
-    private boolean isRunning, isEditing;
+    private boolean isRunning, isEditing, isPostGenMenuRunning;
+    private int postGenMenuIndex;
     private boolean firstRender;
     private int cursorX, cursorY;
-    private int previousCursorX, previousCursorY;
+    private int previousCursorY;
     private CursorPosition textCursorPos;
     private int[] previousSelection;
     private int[] currentSelection;
@@ -55,6 +62,7 @@ public class SpringInit {
     private final String UNDERLINED = "\033[4m";
     private final String RESET_UNDERLINED = "\033[24m";
     private final String GREEN = "\033[38;2;109;179;63m";
+    private final String RED = "\033[38;2;220;50;47m";
     private final String BUTTON_BG_SELECTED = "\033[48;2;50;80;30m";
     private final String BUTTON_BG_UNSELECTED = "\033[48;2;33;33;48m";
     private final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
@@ -80,7 +88,7 @@ public class SpringInit {
         enterAlternateBuffer();
         renderLoading();
         init();
-        hideCursor();
+        // hideCursor();
 
         this.firstRender = true;
         renderUI();
@@ -160,9 +168,7 @@ public class SpringInit {
     private void loadFromCache() {
         this.data = this.cache.data();
 
-        // remove gradle-build and maven-build
-        this.data.type().values().remove(2);
-        this.data.type().values().remove(3);
+        removeUnsupportedProjectTypes();
     }
 
     private void fetchSpringInitData() {
@@ -184,11 +190,12 @@ public class SpringInit {
             this.data = this.mapper.treeToValue(json, MetaData.class);
 
             this.cache = new MetaDataCache(Instant.now().getEpochSecond(), this.data);
+
+            Files.createDirectories(this.cacheDir);
+
             this.mapper.writerWithDefaultPrettyPrinter().writeValue(this.cacheFile, this.cache);
 
-            // remove gradle-build and maven-build
-            this.data.type().values().remove(2);
-            this.data.type().values().remove(3);
+            removeUnsupportedProjectTypes();
 
             con.disconnect();
         } catch (MalformedURLException e) {
@@ -200,10 +207,18 @@ public class SpringInit {
         }
     }
 
-    private void loadConfig() {
-        this.config = this.mapper.readValue(this.configFile.toFile(), MetaDataConfig.class);
+    private void removeUnsupportedProjectTypes() {
+        // remove gradle-build and maven-build
+        this.data.type().values().remove(2);
+        this.data.type().values().remove(3);
+    }
 
-        this.currentSelection[0] = getSelectionIndex(this.data.type().values(), this.config.type());
+    private void loadConfig() {
+        this.config = this.mapper.readValue(this.configFile, MetaDataConfig.class);
+
+        int typeIndex = getSelectionIndex(this.data.type().values(), this.config.type());
+        this.cursorX = typeIndex;
+        this.currentSelection[0] = typeIndex;
         this.currentSelection[1] = getSelectionIndex(this.data.language().values(), this.config.language());
         this.currentSelection[2] = getSelectionIndex(this.data.bootVersion().values(), this.config.bootVersion());
 
@@ -215,8 +230,6 @@ public class SpringInit {
         this.currentSelection[7] = getSelectionIndex(this.data.configurationFileFormat().values(),
                 this.config.configurationFileFormat());
         this.currentSelection[8] = getSelectionIndex(this.data.javaVersion().values(), this.config.javaVersion());
-
-        // debug(Arrays.toString(this.currentSelection));
     }
 
     private int getSelectionIndex(List<MetaDataOption> options, String value) {
@@ -235,6 +248,213 @@ public class SpringInit {
 
     private void generateProject() {
         saveCurrentSelection();
+
+        try {
+            StringBuilder builder = new StringBuilder();
+
+            builder.append("https://start.spring.io/starter.zip?")
+                    .append("type=").append(this.data.type().values().get(this.currentSelection[0]).id())
+                    .append("&language=").append(this.data.language().values().get(this.currentSelection[1]).id())
+                    .append("&bootVersion=").append(this.data.bootVersion().values().get(this.currentSelection[2]).id())
+                    .append("&baseDir=").append(this.artifact.getText())
+                    .append("&groupId=").append(this.group.getText())
+                    .append("&artifactId=").append(this.artifact.getText())
+                    .append("&packageName=").append(this.packageName.getText())
+                    .append("&packaging=").append(this.data.packaging().values().get(this.currentSelection[6]).id())
+                    .append("&javaVersion=").append(this.data.javaVersion().values().get(this.currentSelection[8]).id())
+                    .append("&configurationFileFormat=")
+                    .append(this.data.configurationFileFormat().values().get(this.currentSelection[7]).id());
+
+            URL url = URI.create(builder.toString()).toURL();
+
+            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+
+            con.setRequestMethod("GET");
+            con.setConnectTimeout(5000);
+            con.setReadTimeout(5000);
+
+            int status = con.getResponseCode();
+
+            if (status >= 300) {
+                try (InputStream errorStream = con.getErrorStream()) {
+                    StringBuilder builderError = new StringBuilder();
+
+                    String error = new String(errorStream.readAllBytes(), StandardCharsets.UTF_8);
+
+                    builderError.append(RED)
+                            .append("Error: ")
+                            .append(RESET_COLOR)
+                            .append(error);
+
+                    debug(builderError);
+                    return;
+                }
+            }
+
+            Path cwd = Path.of(System.getProperty("user.dir"));
+            Path projectDir = cwd.resolve(this.artifact.getText());
+
+            if (Files.exists(projectDir)) {
+                StringBuilder builderError = new StringBuilder();
+
+                String message = "Directory already exists: " + projectDir
+                        + " Hint: Artifact needs to be unique in this directory.";
+
+                builderError.append(RED)
+                        .append("Error: ")
+                        .append(RESET_COLOR)
+                        .append(message);
+
+                debug(builderError);
+                return;
+            }
+
+            Files.createDirectories(projectDir);
+
+            try (InputStream stream = con.getInputStream();
+                    ZipInputStream zip = new ZipInputStream(stream)) {
+
+                ZipEntry entry;
+
+                while ((entry = zip.getNextEntry()) != null) {
+                    String entryName = entry.getName();
+
+                    if (entryName.startsWith(this.artifact.getText() + "/")) {
+                        entryName = entryName.substring(this.artifact.getText().length() + 1);
+                    }
+
+                    Path output = projectDir.resolve(entryName);
+
+                    if (entry.isDirectory()) {
+                        Files.createDirectories(output);
+                    } else {
+                        Files.createDirectories(output.getParent());
+                        Files.copy(zip, output, StandardCopyOption.REPLACE_EXISTING);
+                    }
+
+                    zip.closeEntry();
+                }
+            }
+        } catch (MalformedURLException e) {
+            StringBuilder builderError = new StringBuilder();
+
+            builderError.append(RED)
+                    .append("Error: ")
+                    .append(RESET_COLOR)
+                    .append(e.getMessage());
+
+            debug(builderError);
+            return;
+        } catch (IOException e) {
+            StringBuilder builderError = new StringBuilder();
+
+            builderError.append(RED)
+                    .append("Error: ")
+                    .append(RESET_COLOR)
+                    .append(e.getMessage());
+
+            debug(builderError);
+            return;
+        }
+
+        StringBuilder builderSuccess = new StringBuilder();
+
+        builderSuccess.append(GREEN)
+                .append("Success: ")
+                .append(RESET_COLOR)
+                .append("Created project '")
+                .append(this.artifact.getText())
+                .append("'.");
+
+        debug(builderSuccess);
+
+        postGenerationMenu();
+    }
+
+    private void postGenerationMenu() {
+        this.postGenMenuIndex = 0;
+        this.isPostGenMenuRunning = true;
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("\033[1A");
+        renderGenerateButton(builder);
+        IO.print(builder);
+
+        renderPostGenerationOptions();
+
+        while (isPostGenMenuRunning) {
+            int key = readKey();
+
+            switch (key) {
+                case '\r', '\n' -> {
+                    if (this.postGenMenuIndex == 0) {
+                        this.isPostGenMenuRunning = false;
+                        quit();
+                    } else {
+                        this.isPostGenMenuRunning = false;
+                        removePostGenerationOptions();
+                    }
+
+                    return;
+                }
+                case 'A' -> {
+                    if (this.postGenMenuIndex == 1) {
+                        this.postGenMenuIndex = 0;
+                    }
+                }
+                case 'B' -> {
+                    if (this.postGenMenuIndex == 0) {
+                        this.postGenMenuIndex = 1;
+                    }
+                }
+                case 'q', -1, 3 -> {
+                    this.isPostGenMenuRunning = false;
+                    quit();
+                }
+            }
+            renderPostGenerationOptions();
+        }
+    }
+
+    private void renderPostGenerationOptions() {
+        saveCursor();
+
+        StringBuilder builder = new StringBuilder();
+
+        builder.append("\r\n\r\n");
+
+        if (this.postGenMenuIndex == 0) {
+            builder.append(GREEN)
+                    .append("> Exit")
+                    .append(RESET_COLOR)
+                    .append("\r\n")
+                    .append("  Stay open");
+        } else {
+            builder.append("  Exit")
+                    .append("\r\n")
+                    .append(GREEN)
+                    .append("> Stay open")
+                    .append(RESET_COLOR);
+        }
+
+        IO.print(builder);
+
+        restoreCursor();
+    }
+
+    private void removePostGenerationOptions() {
+        saveCursor();
+
+        StringBuilder builder = new StringBuilder();
+
+        builder.append("\r\n\r\n")
+                .append("\033[2K")
+                .append("\r\n")
+                .append("\033[2K");
+
+        IO.print(builder);
+
+        restoreCursor();
     }
 
     private void fillMenuGrid() {
@@ -321,7 +541,9 @@ public class SpringInit {
             }
             case 'i', 'e', '\r', '\n' -> {
                 if (this.cursorY == 9) {
+                    move('A');
                     generateProject();
+                    return true;
                 }
 
                 if ((key == '\r' || key == '\n') && !isTextFieldSelected()) {
@@ -368,7 +590,6 @@ public class SpringInit {
             return;
         }
 
-        this.previousCursorX = this.cursorX;
         this.previousCursorY = this.cursorY;
 
         this.cursorY = newRow;
@@ -406,7 +627,7 @@ public class SpringInit {
     }
 
     private void saveCurrentSelection() {
-        MetaDataConfig config = new MetaDataConfig(
+        this.config = new MetaDataConfig(
                 this.data.type().values().get(this.currentSelection[0]).name(),
                 this.data.language().values().get(this.currentSelection[1]).name(),
                 this.data.bootVersion().values().get(this.currentSelection[2]).name(),
@@ -418,8 +639,14 @@ public class SpringInit {
                 this.data.configurationFileFormat().values().get(this.currentSelection[7]).name(),
                 this.data.javaVersion().values().get(this.currentSelection[8]).name());
 
-        mapper.writerWithDefaultPrettyPrinter()
-                .writeValue(new File("config.json"), config);
+        try {
+            Files.createDirectories(this.configDir);
+
+            mapper.writerWithDefaultPrettyPrinter()
+                    .writeValue(this.configFile.toFile(), config);
+        } catch (IOException e) {
+            debug(e.getMessage());
+        }
     }
 
     private void reset() {
@@ -450,7 +677,7 @@ public class SpringInit {
     }
 
     private void renderUI() {
-        hideCursor();
+        // hideCursor();
         skipLogo();
 
         StringBuilder builder = new StringBuilder();
@@ -471,7 +698,7 @@ public class SpringInit {
             positionTextCursor();
             showCursor();
         } else {
-            hideCursor();
+            // hideCursor();
         }
     }
 
@@ -827,6 +1054,7 @@ public class SpringInit {
 
     private <T> void debug(T value) {
         saveCursor();
+        IO.print("\033[2K");
         IO.print("\033[" + String.valueOf(this.rows) + ";0H");
         IO.print(value);
         restoreCursor();
