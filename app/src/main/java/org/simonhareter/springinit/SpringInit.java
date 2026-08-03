@@ -19,6 +19,7 @@ import java.util.zip.ZipInputStream;
 import org.simonhareter.springinit.libc.Terminal;
 import org.simonhareter.springinit.libc.WindowSize;
 import org.simonhareter.springinit.util.CursorPosition;
+import org.simonhareter.springinit.util.Dialog;
 import org.simonhareter.springinit.util.Direction;
 import org.simonhareter.springinit.util.MetaData;
 import org.simonhareter.springinit.util.MetaDataCache;
@@ -31,12 +32,14 @@ import tools.jackson.databind.ObjectMapper;
 
 public class SpringInit {
     private final Terminal terminal;
+    private final ObjectMapper mapper;
+    private final List<List<Integer>> menuGrid;
+    private final int[] previousSelection;
+    private final int[] currentSelection;
 
-    private ObjectMapper mapper;
     private MetaData data;
     private MetaDataCache cache;
     private MetaDataConfig config;
-    private List<List<Integer>> menuGrid;
 
     private final Path home = Path.of(System.getProperty("user.home"));
     private final Path configDir = this.home.resolve(".config").resolve("spring-initializr-tui");
@@ -44,18 +47,18 @@ public class SpringInit {
     private final Path configFile = this.configDir.resolve("config.json");
     private final Path cacheFile = this.cacheDir.resolve("cache.json");
 
+    private WindowSize windowSize;
     private int rows, columns;
 
-    private boolean isRunning, isEditing, isPostGenMenuRunning;
+    private boolean isRunning, isEditing, isPostGenMenuRunning, isAddDependencyRunning;
     private int postGenMenuIndex;
     private boolean firstRender;
     private int cursorX, cursorY;
     private int previousCursorY;
     private CursorPosition textCursorPos;
-    private int[] previousSelection;
-    private int[] currentSelection;
     private TextField group, artifact, packageName;
     private boolean updatePackageName;
+    private Dialog dependencyDialog;
 
     private final String SELECTED = "\u25CF"; // ●
     private final String UNSELECTED = "\u25CB"; // ○
@@ -63,6 +66,7 @@ public class SpringInit {
     private final String RESET_UNDERLINED = "\033[24m";
     private final String GREEN = "\033[38;2;109;179;63m";
     private final String RED = "\033[38;2;220;50;47m";
+    private final String BG = "\033[48;2;21;21;31m";
     private final String BUTTON_BG_SELECTED = "\033[48;2;50;80;30m";
     private final String BUTTON_BG_UNSELECTED = "\033[48;2;33;33;48m";
     private final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
@@ -81,6 +85,10 @@ public class SpringInit {
 
     public SpringInit(Terminal terminal) {
         this.terminal = terminal;
+        this.mapper = new ObjectMapper();
+        this.menuGrid = new ArrayList<>();
+        this.previousSelection = new int[11];
+        this.currentSelection = new int[11];
     }
 
     public void start() {
@@ -88,7 +96,7 @@ public class SpringInit {
         enterAlternateBuffer();
         renderLoading();
         init();
-        // hideCursor();
+        hideCursor();
 
         this.firstRender = true;
         renderUI();
@@ -121,16 +129,21 @@ public class SpringInit {
         this.isRunning = true;
         this.cursorX = 0;
         this.cursorY = 0;
-        this.menuGrid = new ArrayList<>();
-        this.previousSelection = new int[10];
-        this.currentSelection = new int[10];
-        this.mapper = new ObjectMapper();
 
         terminal.enableRawMode();
 
-        WindowSize windowSize = this.terminal.getWindowSize();
-        this.rows = windowSize.rows();
-        this.columns = windowSize.columns();
+        this.windowSize = this.terminal.getWindowSize();
+        this.rows = this.windowSize.rows();
+        this.columns = this.windowSize.columns();
+
+        int width = (int) (this.columns * 0.8);
+        int height = (int) (this.rows * 0.8);
+
+        // ANSI is 1-based, so + 1
+        int x = (this.columns - width) / 2 + 1;
+        int y = (this.rows - height) / 2 + 1;
+
+        this.dependencyDialog = new Dialog(x, y, width, height);
 
         if (isCacheValid()) {
             loadFromCache();
@@ -460,7 +473,7 @@ public class SpringInit {
     private void fillMenuGrid() {
         int size = 0;
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < this.currentSelection.length; i++) {
             switch (i) {
                 case 0 -> {
                     size = this.data.type().values().size();
@@ -471,7 +484,7 @@ public class SpringInit {
                 case 2 -> {
                     size = this.data.bootVersion().values().size();
                 }
-                case 3, 4, 5 -> size = 1;
+                case 3, 4, 5, 9, 10 -> size = 1;
                 case 6 -> {
                     size = this.data.packaging().values().size();
                 }
@@ -481,7 +494,6 @@ public class SpringInit {
                 case 8 -> {
                     size = this.data.javaVersion().values().size();
                 }
-                case 9 -> size = 1;
             }
 
             List<Integer> list = createRangeList(size);
@@ -539,8 +551,12 @@ public class SpringInit {
                 move(key);
                 return true;
             }
-            case 'i', 'e', '\r', '\n' -> {
+            case 'i', '\r', '\n' -> {
                 if (this.cursorY == 9) {
+                    addDependencies();
+                }
+
+                if (this.cursorY == 10) {
                     move('A');
                     generateProject();
                     return true;
@@ -677,7 +693,7 @@ public class SpringInit {
     }
 
     private void renderUI() {
-        // hideCursor();
+        hideCursor();
         skipLogo();
 
         StringBuilder builder = new StringBuilder();
@@ -689,6 +705,7 @@ public class SpringInit {
         renderPackaging(builder);
         renderConfiguration(builder);
         renderJavaVersion(builder);
+        renderAddDependencies(builder);
         renderGenerateButton(builder);
 
         IO.print(builder);
@@ -698,7 +715,7 @@ public class SpringInit {
             positionTextCursor();
             showCursor();
         } else {
-            // hideCursor();
+            hideCursor();
         }
     }
 
@@ -995,10 +1012,26 @@ public class SpringInit {
         renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
     }
 
-    private void renderGenerateButton(StringBuilder builder) {
+    private void renderAddDependencies(StringBuilder builder) {
         builder.append("\r\n");
 
         if (this.cursorY == 9) {
+            builder.append(BUTTON_BG_SELECTED)
+                    .append(" Add dependencies ")
+                    .append(RESET_COLOR);
+        } else {
+            builder.append(BUTTON_BG_UNSELECTED)
+                    .append(" Add dependencies ");
+        }
+
+        builder.append(RESET_BUTTON_BG)
+                .append("\r\n");
+    }
+
+    private void renderGenerateButton(StringBuilder builder) {
+        builder.append("\r\n");
+
+        if (this.cursorY == 10) {
             builder.append(BUTTON_BG_SELECTED)
                     .append(" Generate ")
                     .append(RESET_COLOR);
@@ -1008,6 +1041,70 @@ public class SpringInit {
         }
 
         builder.append(RESET_BUTTON_BG);
+    }
+
+    private void addDependencies() {
+        saveCursor();
+
+        this.isAddDependencyRunning = true;
+        renderDialog();
+
+        while (isAddDependencyRunning) {
+            int key = readKey();
+
+            switch (key) {
+                case 'q' -> {
+                    isAddDependencyRunning = false;
+                }
+            }
+
+            renderDialog();
+        }
+
+        removeDialog();
+        restoreCursor();
+    }
+
+    private void renderDialog() {
+        StringBuilder builder = new StringBuilder();
+
+        builder.append("\033[H");
+
+        for (int row = 0; row < dependencyDialog.getHeight(); row++) {
+            builder.append("\033[")
+                    .append(this.dependencyDialog.getY() + row)
+                    .append(";")
+                    .append(this.dependencyDialog.getX())
+                    .append("H");
+
+            builder.append(BUTTON_BG_SELECTED)
+                    .append(" ".repeat(this.dependencyDialog.getWidth()))
+                    .append(RESET_BUTTON_BG);
+        }
+
+        IO.print(builder);
+    }
+
+    private void removeDialog() {
+        StringBuilder builder = new StringBuilder();
+
+        builder.append("\033[H");
+
+        for (int row = 0; row < dependencyDialog.getHeight(); row++) {
+            builder.append("\033[")
+                    .append(this.dependencyDialog.getY() + row)
+                    .append(";")
+                    .append(this.dependencyDialog.getX())
+                    .append("H");
+
+            builder.append(BG)
+                    .append(" ".repeat(this.dependencyDialog.getWidth()))
+                    .append(RESET_BUTTON_BG);
+        }
+
+        IO.print(builder);
+        this.firstRender = true;
+        renderUI();
     }
 
     private void renderStatusBar() {
