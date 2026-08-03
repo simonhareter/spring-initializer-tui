@@ -1,0 +1,13 @@
+{
+  "type" : "Gradle - Groovy",
+  "language" : "Java",
+  "bootVersion" : "4.1.1 (SNAPSHOT)",
+  "project" : {
+    "group" : "com.example",
+    "artifact" : "demo",
+    "packageName" : "com.example.demo"
+  },
+  "packaging" : "Jar",
+  "configuration" : "Properties",
+  "java" : "26"
+}

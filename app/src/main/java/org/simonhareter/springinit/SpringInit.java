@@ -1,5 +1,6 @@
 package org.simonhareter.springinit;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -19,7 +20,9 @@ import org.simonhareter.springinit.util.CursorPosition;
 import org.simonhareter.springinit.util.Direction;
 import org.simonhareter.springinit.util.MetaData;
 import org.simonhareter.springinit.util.MetaDataCache;
+import org.simonhareter.springinit.util.MetaDataConfig;
 import org.simonhareter.springinit.util.MetaDataOption;
+import org.simonhareter.springinit.util.Project;
 import org.simonhareter.springinit.util.TextField;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -49,6 +52,9 @@ public class SpringInit {
     private final String UNDERLINED = "\033[4m";
     private final String RESET_UNDERLINED = "\033[24m";
     private final String GREEN = "\033[38;2;109;179;63m";
+    private final String BUTTON_BG_SELECTED = "\033[48;2;50;80;30m";
+    private final String BUTTON_BG_UNSELECTED = "\033[48;2;33;33;48m";
+    private final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
     private final String RESET_COLOR = "\033[0m";
 
     private final int TEXT_START = 26;
@@ -88,6 +94,7 @@ public class SpringInit {
         }
 
         leaveAlternateBuffer();
+          System.exit(0);
     }
 
     private void enterAlternateBuffer() {
@@ -105,8 +112,8 @@ public class SpringInit {
         this.cursorX = 0;
         this.cursorY = 0;
         this.menuGrid = new ArrayList<>();
-        this.previousSelection = new int[9];
-        this.currentSelection = new int[9];
+        this.previousSelection = new int[10];
+        this.currentSelection = new int[10];
         this.mapper = new ObjectMapper();
 
         if (Files.exists(cacheFile)) {
@@ -159,7 +166,7 @@ public class SpringInit {
             this.data = this.mapper.treeToValue(json, MetaData.class);
 
             this.cache = new MetaDataCache(Instant.now().getEpochSecond(), this.data);
-            this.mapper.writeValue(this.cacheFile, this.cache);
+            this.mapper.writerWithDefaultPrettyPrinter().writeValue(this.cacheFile, this.cache);
 
             // remove gradle-build and maven-build
             this.data.type().values().remove(2);
@@ -173,7 +180,10 @@ public class SpringInit {
         } catch (IOException e) {
             IO.println("IOException: " + e.getMessage());
         }
+    }
 
+    private void generateProject() {
+        saveCurrentSelection();
     }
 
     private void fillMenuGrid() {
@@ -221,7 +231,6 @@ public class SpringInit {
     private int readKey() {
         try {
             int key = System.in.read();
-            // IO.println("KEY=" + key + "\n");
 
             // \033 = escape character (decimal value 27)
             if (key != '\033') {
@@ -229,7 +238,6 @@ public class SpringInit {
             }
 
             if (System.in.available() == 0) {
-                IO.print("test123");
                 return '\033';
             }
 
@@ -261,6 +269,10 @@ public class SpringInit {
                 return true;
             }
             case 'i', 'e', '\r', '\n' -> {
+                if (this.cursorY == 9) {
+                    generateProject();
+                }
+
                 if ((key == '\r' || key == '\n') && !isTextFieldSelected()) {
                     return false;
                 }
@@ -278,9 +290,9 @@ public class SpringInit {
 
     private void quit() {
         this.isRunning = false;
+        saveCurrentSelection();
         clearScreen();
         terminal.disableRawMode();
-        System.exit(0);
     }
 
     private void clearScreen() {
@@ -342,6 +354,23 @@ public class SpringInit {
         this.currentSelection[this.cursorY] = this.cursorX;
     }
 
+    private void saveCurrentSelection() {
+        MetaDataConfig config = new MetaDataConfig(
+                this.data.type().values().get(this.currentSelection[0]).name(),
+                this.data.language().values().get(this.currentSelection[1]).name(),
+                this.data.bootVersion().values().get(this.currentSelection[2]).name(),
+                new Project(
+                        this.group.getText(),
+                        this.artifact.getText(),
+                        this.packageName.getText()),
+                this.data.packaging().values().get(this.currentSelection[6]).name(),
+                this.data.configurationFileFormat().values().get(this.currentSelection[7]).name(),
+                this.data.javaVersion().values().get(this.currentSelection[8]).name());
+
+        mapper.writerWithDefaultPrettyPrinter()
+                .writeValue(new File("config.json"), config);
+    }
+
     private void reset() {
         IO.println("reset");
         this.cursorX = 0;
@@ -382,6 +411,7 @@ public class SpringInit {
         renderPackaging(builder);
         renderConfiguration(builder);
         renderJavaVersion(builder);
+        renderGenerateButton(builder);
 
         IO.print(builder);
         if (isTextFieldSelected()) {
@@ -683,6 +713,21 @@ public class SpringInit {
     private void renderJavaVersion(StringBuilder builder) {
         int selectionIndex = 8;
         renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
+    }
+
+    private void renderGenerateButton(StringBuilder builder) {
+        builder.append("\r\n");
+
+        if (this.cursorY == 9) {
+            builder.append(BUTTON_BG_SELECTED)
+                    .append(" Generate ")
+                    .append(RESET_COLOR);
+        } else {
+            builder.append(BUTTON_BG_UNSELECTED)
+                    .append(" Generate ");
+        }
+
+        builder.append(RESET_BUTTON_BG);
     }
 
     private void renderStatusBar() {
