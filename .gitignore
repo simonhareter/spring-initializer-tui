@@ -1,6 +1,7 @@
 biome.json
 metadata.json
 cache.json
+config.json
 
 .settings/org.eclipse.buildship.core.prefs
 app/.classpath
