@@ -63,12 +63,13 @@ public class SpringInit {
     private int contentHeight = 0, scrollOffset = 0, scrollCursorY = 10, viewPortHeight, statusBarHeight = 1,
             debugHeight = 1;
     private final int SCROLL_MARGIN = 5;
-    private int logoHeight = 8, projectHeight = 4, languageHeight = 4, bootVersionHeight = 4, projectMetaDataHeight = 8,
-            packagingHeight = 4,
+    private int logoHeight = 8, projectHeight = 4, languageHeight = 4, bootVersionHeight = 6, groupHeight = 2,
+            artifactHeight = 2, packageNameHeight = 2, packagingHeight = 4,
             configurationHeight = 4, javaVersionHeight = 4,
             addDepHeight = 2, generateHeight = 1, postGenHeight = 3;
-    private SectionLayout logoL, project, language, bootVersion, projectMetaData, packaging, configuration, javaVersion,
-            addDep, generate, postGen;
+    private SectionLayout logoL, project, language, bootVersion, groupL, artifactL, packageNameL,
+            packaging, configuration, javaVersion, addDep, generate, postGen;
+    private SectionLayout[] sections;
 
     private CursorPosition textCursorPos;
     private TextField group, artifact, packageName;
@@ -117,6 +118,21 @@ public class SpringInit {
         renderUI();
         renderStatusBar();
         calculateContentHeight();
+
+        this.sections = new SectionLayout[] {
+                this.project,
+                this.language,
+                this.bootVersion,
+                this.groupL,
+                this.artifactL,
+                this.packageNameL,
+                this.packaging,
+                this.configuration,
+                this.javaVersion,
+                this.addDep,
+                this.generate,
+                this.postGen
+        };
 
         while (this.isRunning) {
             int key = readKey();
@@ -196,8 +212,14 @@ public class SpringInit {
         this.bootVersion = new SectionLayout(row, this.bootVersionHeight);
         row += this.bootVersion.height();
 
-        this.projectMetaData = new SectionLayout(row, this.projectMetaDataHeight);
-        row += this.projectMetaData.height();
+        this.groupL = new SectionLayout(row, this.groupHeight);
+        row += this.groupL.height();
+
+        this.artifactL = new SectionLayout(row, this.artifactHeight);
+        row += this.artifactL.height();
+
+        this.packageNameL = new SectionLayout(row, this.packageNameHeight);
+        row += this.packageNameL.height();
 
         this.packaging = new SectionLayout(row, this.packagingHeight);
         row += this.packaging.height();
@@ -663,11 +685,18 @@ public class SpringInit {
         } else {
             this.cursorX = newCol;
         }
+
+        updateScrollCursorY();
         updateSelection();
     }
 
-    private void updateScrollCursorY() {
+    private SectionLayout getSelectedSection() {
+        return this.sections[this.cursorY];
+    }
 
+    private void updateScrollCursorY() {
+        this.scrollCursorY = getSelectedSection().row();
+        debug(this.scrollCursorY);
     }
 
     private Direction getDirection(int key) {
