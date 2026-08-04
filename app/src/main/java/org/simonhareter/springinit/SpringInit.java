@@ -20,6 +20,7 @@ import java.util.zip.ZipInputStream;
 import org.simonhareter.springinit.libc.Terminal;
 import org.simonhareter.springinit.libc.WindowSize;
 import org.simonhareter.springinit.util.CursorPosition;
+import org.simonhareter.springinit.util.Dependencies;
 import org.simonhareter.springinit.util.Dialog;
 import org.simonhareter.springinit.util.Direction;
 import org.simonhareter.springinit.util.MetaData;
@@ -44,6 +45,7 @@ public class SpringInit {
     private MetaData data;
     private MetaDataCache cache;
     private MetaDataConfig config;
+    private Dependencies dependencies;
 
     private final Path home = Path.of(System.getProperty("user.home"));
     private final Path configDir = this.home.resolve(".config").resolve("spring-initializr-tui");
@@ -62,7 +64,7 @@ public class SpringInit {
     private int cursorX = 0, cursorY = 0, previousCursorY;
 
     // Virtual cursor position
-    private int contentHeight = 0, scrollOffset = 0, oldScrollOffset = 0, scrollCursorY = 0, viewPortHeight,
+    private int scrollOffset = 0, oldScrollOffset = 0, viewPortHeight,
             statusBarHeight = 1,
             debugHeight = 1;
     private final int SCROLL_MARGIN = 3;
@@ -167,7 +169,7 @@ public class SpringInit {
             fetchSpringInitData();
         }
 
-        debug("");
+        // debug("");
 
         this.group = new TextField(this.data.groupId().defaultValue());
         this.artifact = new TextField(this.data.artifactId().defaultValue());
@@ -245,8 +247,6 @@ public class SpringInit {
                 this.generate,
                 this.postGen
         };
-
-        this.contentHeight = row;
     }
 
     private boolean isCacheValid() {
@@ -284,7 +284,9 @@ public class SpringInit {
             JsonNode json = this.mapper.readTree(stream);
 
             this.data = this.mapper.treeToValue(json, MetaData.class);
+            this.dependencies = this.mapper.treeToValue(json.get("dependencies"), Dependencies.class);
 
+           
             this.cache = new MetaDataCache(Instant.now().getEpochSecond(), this.data);
 
             Files.createDirectories(this.cacheDir);
@@ -712,7 +714,6 @@ public class SpringInit {
 
         if (this.cursorY == 0) {
             this.scrollOffset = 0;
-            this.scrollCursorY = getSelectedSection().row();
             return;
         }
 
@@ -727,8 +728,6 @@ public class SpringInit {
         }
 
         this.scrollOffset = Math.max(0, this.scrollOffset);
-
-        this.scrollCursorY = sectionRow - this.scrollOffset;
     }
 
     private Direction getDirection(int key) {
