@@ -21,6 +21,8 @@ import org.simonhareter.springinit.libc.Terminal;
 import org.simonhareter.springinit.libc.WindowSize;
 import org.simonhareter.springinit.util.CursorPosition;
 import org.simonhareter.springinit.util.Dependencies;
+import org.simonhareter.springinit.util.Dependency;
+import org.simonhareter.springinit.util.DependencyGroup;
 import org.simonhareter.springinit.util.Dialog;
 import org.simonhareter.springinit.util.Direction;
 import org.simonhareter.springinit.util.MetaData;
@@ -67,14 +69,20 @@ public class SpringInit {
     private int scrollOffset = 0, oldScrollOffset = 0, viewPortHeight,
             statusBarHeight = 1,
             debugHeight = 1;
-    private final int SCROLL_MARGIN = 3;
+    private static final int SCROLL_MARGIN = 3;
+
     private SectionLayout logoL, project, language, bootVersion, projectMetaData, groupL, artifactL, packageNameL,
             packaging, configuration, javaVersion, addDep, generate, postGen;
     private SectionLayout[] sections;
 
     private CursorPosition textCursorPos;
     private TextField group, artifact, packageName;
+
     private Dialog dependencyDialog;
+    private int depCursorY = 1;
+    private List<Dependency> selectedDependencies;
+    private Dependency[] allDependencies;
+    private static final int SCROLL_DEP_MARGIN = 10;
 
     private static final String SELECTED = "\u25CF"; // ●
     private static final String UNSELECTED = "\u25CB"; // ○
@@ -90,6 +98,8 @@ public class SpringInit {
     private static final String BUTTON_BG_UNSELECTED = "\033[48;2;33;33;48m";
     private static final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
     private static final String RESET_COLOR = "\033[0m";
+    private static final String BORDER_COLOR = "\033[38;5;240m";
+    private static final String DEP_LINE_COLOR = "\033[48;2;103;103;152m";
 
     public static final char TL = '╭';
     public static final char TR = '╮';
@@ -115,6 +125,7 @@ public class SpringInit {
         this.menuGrid = new ArrayList<>();
         this.previousSelection = new int[11];
         this.currentSelection = new int[11];
+        this.selectedDependencies = new ArrayList<>();
     }
 
     public void start() {
@@ -185,6 +196,8 @@ public class SpringInit {
         if (doesConfigExist()) {
             loadConfig();
         }
+
+        populateAllDependencyArray();
 
         fillMenuGrid();
     }
@@ -270,6 +283,7 @@ public class SpringInit {
 
     private void loadFromCache() {
         this.data = this.cache.data();
+        this.dependencies = this.cache.dependencies();
 
         removeUnsupportedProjectTypes();
     }
@@ -293,7 +307,7 @@ public class SpringInit {
             this.data = this.mapper.treeToValue(json, MetaData.class);
             this.dependencies = this.mapper.treeToValue(json.get("dependencies"), Dependencies.class);
 
-            this.cache = new MetaDataCache(Instant.now().getEpochSecond(), this.data);
+            this.cache = new MetaDataCache(Instant.now().getEpochSecond(), this.data, this.dependencies);
 
             Files.createDirectories(this.cacheDir);
 
@@ -1185,6 +1199,7 @@ public class SpringInit {
         return cursorIdx;
     }
 
+    // for the main spring-initializr-tui ui
     private boolean isIllegalCursorMove(int c) {
         this.textCursorPos = getCursorPosition();
 
@@ -1357,6 +1372,7 @@ public class SpringInit {
         renderDialogBackGround();
         renderDialogWindow();
         showCursor();
+        renderDialogTitle();
         renderDialog();
 
         while (isAddDependencyRunning) {
@@ -1366,33 +1382,87 @@ public class SpringInit {
                 case 'q', '\033' -> {
                     isAddDependencyRunning = false;
                 }
+                case 'A', 'B' -> {
+                    moveDependencyCursor(key);
+                    renderDependencyCursorLine();
+                }
             }
-
-            renderDialogWindow();
         }
 
         removeDialogWindow();
         restoreCursor();
     }
 
+    private void moveDependencyCursor(int key) {
+        Direction dir = getDirection(key);
+
+        if (isIllegalDependencyCursorMove(dir)) {
+            return;
+        }
+
+        switch (dir) {
+            case UP -> {
+                IO.print("\033[1A");
+                this.depCursorY--;
+            }
+            case DOWN -> {
+                IO.print("\033[1B");
+                this.depCursorY++;
+            }
+            default -> {
+
+            }
+        }
+    }
+
+    private boolean isIllegalDependencyCursorMove(Direction dir) {
+        switch (dir) {
+            case UP -> {
+                if (this.depCursorY == 1) {
+                    return true;
+                }
+            }
+            case DOWN -> {
+                if (this.depCursorY == this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN) {
+                    return true;
+                }
+            }
+            default -> {
+
+            }
+        }
+        return false;
+    }
+
+    private void renderDependencyCursorLine() {
+        saveCursor();
+        StringBuilder builder = new StringBuilder();
+        builder.append(DEP_LINE_COLOR).append(" ".repeat(this.dependencyDialog.getWidth() - 2)).append(RESET_BUTTON_BG);
+        IO.print(builder);
+        restoreCursor();
+    }
+
     private void renderDialog() {
         StringBuilder builder = new StringBuilder();
 
-        renderDialogTitle(builder);
         renderDependencies(builder);
         renderDialogStatusBar(builder);
 
+        positionDialogCursor(1, 1, builder);
         IO.print(builder);
         this.dependencyFirstRender = false;
     }
 
-    private void renderDialogTitle(StringBuilder builder) {
+    private void renderDialogTitle() {
+        StringBuilder builder = new StringBuilder();
+
         final String title = " Dependencies ";
         int corner = 1;
         int textStart = (this.dependencyDialog.getWidth() - corner * 2 - title.length()) / 2 + corner;
 
+        builder.append(BORDER_COLOR);
         for (int row = 0; row < this.dependencyDialog.getHeight(); row++) {
-            positionDialogCursor(row, builder);
+            positionDialogCursor(row, 0, builder);
             for (int col = 0; col < this.dependencyDialog.getWidth(); col++) {
                 if (row == 0) {
                     if (col == 0) {
@@ -1400,7 +1470,7 @@ public class SpringInit {
                     } else if (col == this.dependencyDialog.getWidth() - 1) {
                         builder.append(TR);
                     } else if (col == textStart) {
-                        builder.append(title);
+                        builder.append(RESET_COLOR).append(title).append(BORDER_COLOR);
                         col += title.length() - 1;
                     } else {
                         builder.append(H);
@@ -1422,14 +1492,83 @@ public class SpringInit {
                 }
             }
         }
+
+        builder.append(RESET_COLOR);
+        IO.print(builder);
     }
 
     private void renderDependencies(StringBuilder builder) {
-        
+        int offsetY = 2, offsetX = 2;
+        String nothingSelected = "No dependencies.";
+
+        // Group Filter: press <C-f> to apply filter
+        positionDialogCursor(offsetY, offsetX, builder);
+        builder.append("Group Filter: press <C-f> to apply filter");
+        offsetY += 2;
+
+        positionDialogCursor(offsetY, offsetX, builder);
+        builder.append("Selected ").append(BORDER_COLOR).append("(").append(this.selectedDependencies.size())
+                .append(")").append(RESET_COLOR);
+        offsetY += 1;
+
+        if (this.selectedDependencies.size() == 0) {
+            positionDialogCursor(offsetY, (this.dependencyDialog.getWidth() - nothingSelected.length()) / 2,
+                    builder);
+            builder.append(nothingSelected).append("\r\n");
+            offsetY += 2;
+        }
+
+        positionDialogCursor(offsetY, offsetX, builder);
+        builder.append("Available ").append(BORDER_COLOR).append("(").append(calculateTotalDependencies()).append(")")
+                .append(RESET_COLOR);
+        offsetY += 1;
+        offsetX += 2;
+
+        for (int i = 0; i < this.dependencies.values()[0].values().length; i++) {
+            positionDialogCursor(offsetY, offsetX, builder);
+            builder.append(UNSELECTED).append(" ").append(this.dependencies.values()[0].values()[i].name());
+            offsetY += 1;
+        }
+    }
+
+    private int calculateTotalDependencies() {
+        int counter = 0;
+
+        for (DependencyGroup group : this.dependencies.values()) {
+            counter += group.values().length;
+        }
+
+        return counter;
+    }
+
+    private void populateAllDependencyArray() {
+        this.allDependencies = new Dependency[calculateTotalDependencies()];
+
+        int position = 0;
+
+        for (DependencyGroup group : this.dependencies.values()) {
+            System.arraycopy(group.values(), 0, this.allDependencies, position, group.values().length);
+            position += group.values().length;
+        }
     }
 
     private void renderDialogStatusBar(StringBuilder builder) {
-        
+        boolean isSelected = false;
+
+        String hintsSelected = "↑↓ Navigate  Space Deselect  Enter Apply  Esc Cancel";
+        String hintsUnselected = "↑↓ Navigate  Space Select  Enter Apply  Esc Cancel";
+        String hints;
+
+        if (isSelected) {
+            hints = hintsSelected;
+        } else {
+            hints = hintsUnselected;
+        }
+
+        int border = 1, space = (this.dependencyDialog.getWidth() - border * 2 - hints.length()) / 2;
+
+        positionDialogCursor(this.dependencyDialog.getHeight() - 2, 1, builder);
+        builder.append(" ".repeat(space)).append(hints).append(" ".repeat(space));
     }
 
     private void renderDialogBackGround() {
@@ -1474,11 +1613,11 @@ public class SpringInit {
         IO.print(builderDialog);
     }
 
-    private void positionDialogCursor(int offset, StringBuilder builderCursor) {
+    private void positionDialogCursor(int offsetY, int offsetX, StringBuilder builderCursor) {
         builderCursor.append("\033[")
-                .append(this.dependencyDialog.getY() + offset)
+                .append(this.dependencyDialog.getY() + offsetY)
                 .append(";")
-                .append(this.dependencyDialog.getX())
+                .append(this.dependencyDialog.getX() + offsetX)
                 .append("H");
     }
 

@@ -2,5 +2,6 @@ package org.simonhareter.springinit.util;
 
 public record MetaDataCache(
         long timestamp,
-        MetaData data) {
+        MetaData data,
+        Dependencies dependencies) {
 }
