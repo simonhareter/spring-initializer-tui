@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -28,6 +29,7 @@ import org.simonhareter.springinit.util.MetaDataOption;
 import org.simonhareter.springinit.util.Project;
 import org.simonhareter.springinit.util.SectionLayout;
 import org.simonhareter.springinit.util.TextField;
+import org.simonhareter.springinit.util.VisibleRange;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -60,10 +62,11 @@ public class SpringInit {
     private int cursorX = 0, cursorY = 0, previousCursorY;
 
     // Virtual cursor position
-    private int contentHeight = 0, scrollOffset = 0, scrollCursorY = 10, viewPortHeight, statusBarHeight = 1,
-            debugHeight = 1, rowsRendered = 0;
-    private final int SCROLL_MARGIN = 5;
-    private SectionLayout logoL, project, language, bootVersion, groupL, artifactL, packageNameL,
+    private int contentHeight = 0, scrollOffset = 0, oldScrollOffset = 0, scrollCursorY = 0, viewPortHeight,
+            statusBarHeight = 1,
+            debugHeight = 1;
+    private final int SCROLL_MARGIN = 3;
+    private SectionLayout logoL, project, language, bootVersion, projectMetaData, groupL, artifactL, packageNameL,
             packaging, configuration, javaVersion, addDep, generate, postGen;
     private SectionLayout[] sections;
 
@@ -110,25 +113,9 @@ public class SpringInit {
         renderLoading();
         init();
         calculateContentHeight();
-        renderLogo();
-        // hideCursor();
+        hideCursor();
         renderUI();
         renderStatusBar();
-
-        this.sections = new SectionLayout[] {
-                this.project,
-                this.language,
-                this.bootVersion,
-                this.groupL,
-                this.artifactL,
-                this.packageNameL,
-                this.packaging,
-                this.configuration,
-                this.javaVersion,
-                this.addDep,
-                this.generate,
-                this.postGen
-        };
 
         while (this.isRunning) {
             int key = readKey();
@@ -196,10 +183,11 @@ public class SpringInit {
     private void calculateContentHeight() {
         int row = 0;
 
-        int logoHeight = 8, projectHeight = 4, languageHeight = 4, bootVersionHeight = 6, groupHeight = 2,
+        int logoHeight = 8, projectHeight = 4, languageHeight = 4, bootVersionHeight = 4, projectMetaDataHeight = 2,
+                groupHeight = 2,
                 artifactHeight = 2, packageNameHeight = 2, packagingHeight = 4,
                 configurationHeight = 4, javaVersionHeight = 4,
-                addDepHeight = 2, generateHeight = 1, postGenHeight = 3;
+                addDepHeight = 1, generateHeight = 1, postGenHeight = 3;
 
         this.logoL = new SectionLayout(row, logoHeight);
         row += this.logoL.height();
@@ -212,6 +200,9 @@ public class SpringInit {
 
         this.bootVersion = new SectionLayout(row, bootVersionHeight);
         row += this.bootVersion.height();
+
+        this.projectMetaData = new SectionLayout(row, projectMetaDataHeight);
+        row += this.projectMetaData.height();
 
         this.groupL = new SectionLayout(row, groupHeight);
         row += this.groupL.height();
@@ -239,6 +230,21 @@ public class SpringInit {
 
         this.postGen = new SectionLayout(row, postGenHeight);
         row += this.postGen.height();
+
+        this.sections = new SectionLayout[] {
+                this.project,
+                this.language,
+                this.bootVersion,
+                this.groupL,
+                this.artifactL,
+                this.packageNameL,
+                this.packaging,
+                this.configuration,
+                this.javaVersion,
+                this.addDep,
+                this.generate,
+                this.postGen
+        };
 
         this.contentHeight = row;
     }
@@ -657,8 +663,14 @@ public class SpringInit {
     }
 
     private void clearScreen() {
-        System.out.print("\033[2J"); // clear screen
-        System.out.print("\033[H"); // reset cursor
+        System.out.print("\033[H");
+
+        for (int i = 0; i < viewPortHeight; i++) {
+            System.out.print("\033[2K");
+            System.out.print("\033[1B");
+        }
+
+        System.out.print("\033[H");
     }
 
     private void move(int key) {
@@ -696,7 +708,27 @@ public class SpringInit {
     }
 
     private void updateScrollCursorY() {
-        this.scrollCursorY = getSelectedSection().row();
+        int sectionRow = getSelectedSection().row();
+
+        if (this.cursorY == 0) {
+            this.scrollOffset = 0;
+            this.scrollCursorY = getSelectedSection().row();
+            return;
+        }
+
+        this.oldScrollOffset = this.scrollOffset;
+
+        int desiredCursorRow = sectionRow - this.scrollOffset;
+
+        if (desiredCursorRow >= this.viewPortHeight - SCROLL_MARGIN) {
+            this.scrollOffset = sectionRow - (this.viewPortHeight - SCROLL_MARGIN - 1);
+        } else if (desiredCursorRow < SCROLL_MARGIN) {
+            this.scrollOffset = sectionRow - SCROLL_MARGIN;
+        }
+
+        this.scrollOffset = Math.max(0, this.scrollOffset);
+
+        this.scrollCursorY = sectionRow - this.scrollOffset;
     }
 
     private Direction getDirection(int key) {
@@ -752,51 +784,76 @@ public class SpringInit {
         debug(builder);
     }
 
-    private void renderLogo() {
-        StringBuilder builder = new StringBuilder();
+    private VisibleRange getRenderRange(SectionLayout layout) {
+        int sectionTop = layout.row();
+        int sectionBottom = sectionTop + layout.height();
 
-        builder.append("\033[H");
+        int visibleTop = Math.max(sectionTop, this.scrollOffset);
+        int visibleBottom = Math.min(sectionBottom, this.scrollOffset + this.viewPortHeight);
 
-        for (String line : this.logo) {
-
-            if (this.isDimmed) {
-                builder.append(BG_DIMMED)
-                        .append(DIMMED);
-            }
-
-            builder.append(GREEN)
-                    .append(line, 0, 35)
-                    .append(RESET_COLOR);
-
-            if (this.isDimmed) {
-                builder.append(BG_DIMMED)
-                        .append(DIMMED);
-                ;
-            }
-
-            builder.append(line.substring(35))
-                    .append("\r\n");
-
+        if (visibleTop >= visibleBottom) {
+            return null;
         }
 
-        builder.append("\r\n\r\n")
-                .append(RESET_BUTTON_BG)
+        return new VisibleRange(visibleTop - sectionTop, visibleBottom - sectionTop);
+    }
+
+    private void renderLogo(StringBuilder builder) {
+        VisibleRange range = getRenderRange(this.logoL);
+
+        if (range == null) {
+            return;
+        }
+
+        for (int row = range.start(); row < range.end(); row++) {
+            if (row < this.logo.length) {
+                String line = this.logo[row];
+
+                if (this.isDimmed) {
+                    builder.append(BG_DIMMED)
+                            .append(DIMMED);
+                }
+
+                builder.append(GREEN)
+                        .append(line, 0, 35)
+                        .append(RESET_COLOR);
+
+                if (this.isDimmed) {
+                    builder.append(BG_DIMMED)
+                            .append(DIMMED);
+                }
+
+                builder.append(line.substring(35));
+
+                if (this.isDimmed) {
+                    builder.append(RESET_DIMMED);
+                }
+            }
+
+            builder.append("\r\n");
+        }
+
+        builder.append(RESET_BUTTON_BG)
                 .append(RESET_DIMMED);
+    }
 
-        IO.print(builder);
-
-        this.rowsRendered += this.logoL.height();
+    private boolean scrollOffsetChanged() {
+        return this.oldScrollOffset != this.scrollOffset;
     }
 
     private void renderUI() {
-        this.rowsRendered = 0;
-
-        // hideCursor();
-        skipLogo();
-        this.rowsRendered += this.logoL.height();
+        hideCursor();
 
         StringBuilder builder = new StringBuilder();
 
+        if (scrollOffsetChanged()) {
+            this.firstRender = true;
+            clearScreen();
+        }
+
+        IO.print("\033[H");
+
+        renderLogo(builder);
         renderProject(builder);
         renderLanguage(builder);
         renderBootVersion(builder);
@@ -814,14 +871,17 @@ public class SpringInit {
             positionTextCursor();
             showCursor();
         } else {
-            // hideCursor();
+            hideCursor();
         }
 
-        debug(this.rowsRendered);
+        this.oldScrollOffset = this.scrollOffset;
     }
 
     private void renderSelectionRow(StringBuilder builder, String title, List<MetaDataOption> options,
-            int selectionIndex) {
+            int selectionIndex, VisibleRange range, SectionLayout layout) {
+
+        String[] lines = new String[layout.height()];
+        Arrays.fill(lines, "");
 
         boolean selectionChanged = currentSelection[selectionIndex] != previousSelection[selectionIndex];
         boolean isPreviousRow = this.previousCursorY == selectionIndex;
@@ -833,77 +893,103 @@ public class SpringInit {
         }
 
         if (this.firstRender || selectionChanged || cursorY == selectionIndex) {
-            builder.append(title).append("\r\n\r\n");
-            renderOptions(builder, options, selectionIndex, isUnderlined);
+            lines[0] = title;
+            lines[1] = "";
+            renderOptions(options, selectionIndex, isUnderlined, lines);
         } else if (isPreviousRow) {
-            builder.append(title).append("\r\n\r\n");
-            renderOptions(builder, options, selectionIndex, false);
+            lines[0] = title;
+            lines[1] = " ";
+            renderOptions(options, selectionIndex, false, lines);
         } else {
-            builder.append("\r\033[2B");
+            lines[0] = "";
+            lines[1] = "";
         }
 
-        builder.append("\r\n\r\n");
+        lines[3] = "";
+
+        for (int i = range.start(); i < range.end(); i++) {
+            String line = lines[i];
+            builder.append(line).append("\r\n");
+        }
 
         if (this.isDimmed) {
             builder.append(RESET_DIMMED);
         }
     }
 
-    private void renderOptions(StringBuilder builder, List<MetaDataOption> options, int selectionIndex,
-            boolean isUnderlined) {
+    private void renderOptions(List<MetaDataOption> options, int selectionIndex,
+            boolean isUnderlined, String[] lines) {
+
+        StringBuilder line = new StringBuilder();
 
         for (int i = 0; i < options.size(); i++) {
-            if (i == currentSelection[selectionIndex]) {
+            boolean isSelected = i == currentSelection[selectionIndex];
+
+            if (isSelected) {
                 if (isUnderlined) {
-                    builder.append(UNDERLINED);
+                    line.append(UNDERLINED);
                 }
 
-                builder.append(GREEN + SELECTED + " ")
+                line.append(GREEN + SELECTED + " ")
                         .append(options.get(i).name())
                         .append(RESET_COLOR);
 
                 if (isDimmed) {
-                    builder.append(BG_DIMMED)
+                    line.append(BG_DIMMED)
                             .append(DIMMED)
                             .append("  ");
                 } else {
-                    builder.append("  ");
+                    line.append("  ");
                 }
 
                 if (isUnderlined) {
-                    builder.append(RESET_UNDERLINED);
+                    line.append(RESET_UNDERLINED);
                 }
             } else {
-                builder.append(UNSELECTED + " ").append(options.get(i).name()).append("  ");
+                line.append(UNSELECTED)
+                        .append(" ")
+                        .append(options.get(i).name())
+                        .append("  ");
             }
         }
+        lines[2] = line.toString();
     }
 
     private void renderProject(StringBuilder builder) {
         int selectionIndex = 0;
 
-        if (this.rowsRendered + this.project.height() <= this.viewPortHeight) {
-            renderSelectionRow(builder, "Project", this.data.type().values(), selectionIndex);
-            this.rowsRendered += this.project.height();
+        VisibleRange range = getRenderRange(this.project);
+
+        if (range == null) {
+            return;
         }
+
+        renderSelectionRow(builder, "Project", this.data.type().values(), selectionIndex, range, this.project);
     }
 
     private void renderLanguage(StringBuilder builder) {
         int selectionIndex = 1;
 
-        if (this.rowsRendered + this.language.height() <= this.viewPortHeight) {
-            renderSelectionRow(builder, "Language", this.data.language().values(), selectionIndex);
-            this.rowsRendered += this.language.height();
+        VisibleRange range = getRenderRange(this.language);
+
+        if (range == null) {
+            return;
         }
+
+        renderSelectionRow(builder, "Language", this.data.language().values(), selectionIndex, range, this.language);
     }
 
     private void renderBootVersion(StringBuilder builder) {
         int selectionIndex = 2;
 
-        if (this.rowsRendered + this.bootVersion.height() <= this.viewPortHeight) {
-            renderSelectionRow(builder, "Spring Boot", this.data.bootVersion().values(), selectionIndex);
-            this.rowsRendered += this.bootVersion.height();
+        VisibleRange range = getRenderRange(this.bootVersion);
+
+        if (range == null) {
+            return;
         }
+
+        renderSelectionRow(builder, "Spring Boot", this.data.bootVersion().values(), selectionIndex, range,
+                this.bootVersion);
     }
 
     private void renderProjectMetaData(StringBuilder builder) {
@@ -912,21 +998,25 @@ public class SpringInit {
                     .append(DIMMED);
         }
 
-        builder.append("Project Metadata\r\n\r\n");
-
-        if (this.rowsRendered + this.groupL.height() <= this.viewPortHeight) {
-            renderTextField(builder, "Group", this.group, 3);
-            this.rowsRendered += this.groupL.height();
+        VisibleRange projectMetaDataRange = getRenderRange(this.projectMetaData);
+        if (projectMetaDataRange != null) {
+            builder.append("Project Metadata\r\n\r\n");
         }
 
-        if (this.rowsRendered + this.artifactL.height() <= this.viewPortHeight) {
-            renderTextField(builder, "Artifact", this.artifact, 4);
-            this.rowsRendered += this.groupL.height();
+        VisibleRange groupRange = getRenderRange(this.groupL);
+
+        if (groupRange != null) {
+            renderTextField(builder, "Group", this.group, 3, groupRange);
         }
 
-        if (this.rowsRendered + this.packageNameL.height() <= this.viewPortHeight) {
-            renderTextField(builder, "Package name", formatPackageName(), 5);
-            this.rowsRendered += this.groupL.height();
+        VisibleRange artifactRange = getRenderRange(this.artifactL);
+        if (artifactRange != null) {
+            renderTextField(builder, "Artifact", this.artifact, 4, artifactRange);
+        }
+
+        VisibleRange packageNameRange = getRenderRange(this.packageNameL);
+        if (packageNameRange != null) {
+            renderTextField(builder, "Package name", formatPackageName(), 5, packageNameRange);
         }
 
         if (isDimmed) {
@@ -934,22 +1024,31 @@ public class SpringInit {
         }
     }
 
-    private void renderTextField(StringBuilder builder, String title, TextField field, int selectionIndex) {
-        builder.append("\033[2K");
+    private void renderTextField(StringBuilder builder, String title, TextField field, int selectionIndex,
+            VisibleRange range) {
+        String[] lines = new String[2];
 
-        builder.append(String.format("    - %-14s: ", title));
+        StringBuilder line = new StringBuilder();
 
-        if (selectionIndex == this.cursorY) {
-            builder.append("[  ");
-        }
-
-        builder.append(field.getText());
+        line.append("\033[2K");
+        line.append(String.format("    - %-14s: ", title));
 
         if (selectionIndex == this.cursorY) {
-            builder.append("  ]");
+            line.append("[  ");
         }
 
-        builder.append("\r\n\r\n");
+        line.append(field.getText());
+
+        if (selectionIndex == this.cursorY) {
+            line.append("  ]");
+        }
+
+        lines[0] = line.toString();
+        lines[1] = "";
+
+        for (int i = range.start(); i < range.end(); i++) {
+            builder.append(lines[i]).append("\r\n");
+        }
     }
 
     private void writeTextField() {
@@ -978,7 +1077,7 @@ public class SpringInit {
                 }
             }
         }
-        // hideCursor();
+        hideCursor();
     }
 
     private int writeText(StringBuilder builder, int cursorIdx, int key) {
@@ -1046,11 +1145,11 @@ public class SpringInit {
     }
 
     private void positionTextCursor() {
-        switch (this.cursorY) {
-            case 3 -> IO.print("\033[23;" + TEXT_START + "H");
-            case 4 -> IO.print("\033[25;" + TEXT_START + "H");
-            case 5 -> IO.print("\033[27;" + TEXT_START + "H");
-        }
+        SectionLayout section = getSelectedSection();
+
+        int row = Math.max(section.row() - this.scrollOffset, 0) + 1;
+
+        IO.print("\033[" + row + ";" + TEXT_START + "H");
     }
 
     private TextField formatPackageName() {
@@ -1060,7 +1159,7 @@ public class SpringInit {
         return this.packageName;
     }
 
-    private int moveCursor(int c, int cursorIdx) {
+    int moveCursor(int c, int cursorIdx) {
         if (isIllegalCursorMove(c)) {
             return -1;
         }
@@ -1150,56 +1249,65 @@ public class SpringInit {
     private void renderPackaging(StringBuilder builder) {
         int selectionIndex = 6;
 
-        if (this.rowsRendered + this.packaging.height() <= this.viewPortHeight) {
-            renderSelectionRow(builder, "Packaging", this.data.packaging().values(), selectionIndex);
-            this.rowsRendered += this.packaging.height();
+        VisibleRange range = getRenderRange(this.packaging);
+
+        if (range == null) {
+            return;
         }
 
+        renderSelectionRow(builder, "Packaging", this.data.packaging().values(), selectionIndex, range, this.packaging);
     }
 
     private void renderConfiguration(StringBuilder builder) {
         int selectionIndex = 7;
 
-        if (this.rowsRendered + this.configuration.height() <= this.viewPortHeight) {
-            renderSelectionRow(builder, "Configuration", this.data.configurationFileFormat().values(),
-                    selectionIndex);
-            this.rowsRendered += this.configuration.height();
+        VisibleRange range = getRenderRange(this.configuration);
+
+        if (range == null) {
+            return;
         }
+
+        renderSelectionRow(builder, "Configuration", this.data.configurationFileFormat().values(),
+                selectionIndex, range, this.configuration);
     }
 
     private void renderJavaVersion(StringBuilder builder) {
         int selectionIndex = 8;
 
-        if (this.rowsRendered + this.javaVersion.height() <= this.viewPortHeight) {
-            renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex);
-            this.rowsRendered += this.javaVersion.height();
+        VisibleRange range = getRenderRange(this.javaVersion);
+
+        if (range == null) {
+            return;
         }
+
+        renderSelectionRow(builder, "Java", this.data.javaVersion().values(), selectionIndex, range, this.javaVersion);
     }
 
     private void renderAddDependencies(StringBuilder builder) {
+        VisibleRange range = getRenderRange(this.addDep);
+
+        if (range == null) {
+            return;
+        }
+
         if (this.isDimmed) {
             builder.append(BG_DIMMED)
                     .append(DIMMED);
         }
 
-        if (this.rowsRendered + this.addDep.height() <= this.viewPortHeight) {
+        builder.append("\r\n");
 
-            builder.append("\r\n");
-
-            if (this.cursorY == 9) {
-                builder.append(BUTTON_BG_SELECTED)
-                        .append(" Add dependencies ")
-                        .append(RESET_COLOR);
-            } else {
-                builder.append(BUTTON_BG_UNSELECTED)
-                        .append(" Add dependencies ");
-            }
-
-            builder.append(RESET_BUTTON_BG)
-                    .append("\r\n");
-
-            this.rowsRendered += this.addDep.height();
+        if (this.cursorY == 9) {
+            builder.append(BUTTON_BG_SELECTED)
+                    .append(" Add dependencies ")
+                    .append(RESET_COLOR);
+        } else {
+            builder.append(BUTTON_BG_UNSELECTED)
+                    .append(" Add dependencies ");
         }
+
+        builder.append(RESET_BUTTON_BG)
+                .append("\r\n");
 
         if (this.isDimmed) {
             builder.append(RESET_DIMMED);
@@ -1207,28 +1315,29 @@ public class SpringInit {
     }
 
     private void renderGenerateButton(StringBuilder builder) {
+        VisibleRange range = getRenderRange(this.generate);
+
+        if (range == null) {
+            return;
+        }
+
         if (this.isDimmed) {
             builder.append(BG_DIMMED)
                     .append(DIMMED);
         }
 
-        if (this.rowsRendered + this.generate.height() <= this.viewPortHeight) {
+        builder.append("\r\n");
 
-            builder.append("\r\n");
-
-            if (this.cursorY == 10) {
-                builder.append(BUTTON_BG_SELECTED)
-                        .append(" Generate ")
-                        .append(RESET_COLOR);
-            } else {
-                builder.append(BUTTON_BG_UNSELECTED)
-                        .append(" Generate ");
-            }
-
-            builder.append(RESET_BUTTON_BG);
-
-            this.rowsRendered += this.generate.height();
+        if (this.cursorY == 10) {
+            builder.append(BUTTON_BG_SELECTED)
+                    .append(" Generate ")
+                    .append(RESET_COLOR);
+        } else {
+            builder.append(BUTTON_BG_UNSELECTED)
+                    .append(" Generate ");
         }
+
+        builder.append(RESET_BUTTON_BG);
 
         if (this.isDimmed) {
             builder.append(RESET_DIMMED);
@@ -1276,7 +1385,6 @@ public class SpringInit {
         IO.print(builderDimmed);
 
         this.isDimmed = true;
-        renderLogo();
         this.firstRender = true;
         renderUI();
         renderStatusBar();
@@ -1331,7 +1439,6 @@ public class SpringInit {
 
         IO.print(builder);
         this.firstRender = true;
-        renderLogo();
         renderUI();
         renderStatusBar();
     }
@@ -1373,10 +1480,6 @@ public class SpringInit {
 
         IO.print(builder);
         restoreCursor();
-    }
-
-    private void skipLogo() {
-        IO.print("\033[9;0H");
     }
 
     private void hideCursor() {
