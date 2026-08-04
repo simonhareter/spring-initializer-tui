@@ -57,7 +57,7 @@ public class SpringInit {
     private int rows, columns;
 
     private boolean isRunning, isEditing, isPostGenMenuRunning, isAddDependencyRunning, updatePackageName, isDimmed,
-            firstRender;
+            firstRender, dependencyFirstRender;
     private int postGenMenuIndex = 0;
 
     // Cursor position inside the menu grid
@@ -76,20 +76,27 @@ public class SpringInit {
     private TextField group, artifact, packageName;
     private Dialog dependencyDialog;
 
-    private final String SELECTED = "\u25CF"; // ●
-    private final String UNSELECTED = "\u25CB"; // ○
-    private final String UNDERLINED = "\033[4m";
-    private final String RESET_UNDERLINED = "\033[24m";
-    private final String GREEN = "\033[38;2;109;179;63m";
-    private final String RED = "\033[38;2;220;50;47m";
-    private final String BG = "\033[48;2;21;21;31m";
-    private final String BG_DIMMED = "\033[48;2;10;10;20m";
-    private final String DIMMED = "\033[2m";
-    private final String RESET_DIMMED = "\033[22m";
-    private final String BUTTON_BG_SELECTED = "\033[48;2;50;80;30m";
-    private final String BUTTON_BG_UNSELECTED = "\033[48;2;33;33;48m";
-    private final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
-    private final String RESET_COLOR = "\033[0m";
+    private static final String SELECTED = "\u25CF"; // ●
+    private static final String UNSELECTED = "\u25CB"; // ○
+    private static final String UNDERLINED = "\033[4m";
+    private static final String RESET_UNDERLINED = "\033[24m";
+    private static final String GREEN = "\033[38;2;109;179;63m";
+    private static final String RED = "\033[38;2;220;50;47m";
+    private static final String BG = "\033[48;2;21;21;31m";
+    private static final String BG_DIMMED = "\033[48;2;10;10;20m";
+    private static final String DIMMED = "\033[2m";
+    private static final String RESET_DIMMED = "\033[22m";
+    private static final String BUTTON_BG_SELECTED = "\033[48;2;50;80;30m";
+    private static final String BUTTON_BG_UNSELECTED = "\033[48;2;33;33;48m";
+    private static final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
+    private static final String RESET_COLOR = "\033[0m";
+
+    public static final char TL = '╭';
+    public static final char TR = '╮';
+    public static final char BL = '╰';
+    public static final char BR = '╯';
+    public static final char H = '─';
+    public static final char V = '│';
 
     private final int TEXT_START = 26;
 
@@ -286,7 +293,6 @@ public class SpringInit {
             this.data = this.mapper.treeToValue(json, MetaData.class);
             this.dependencies = this.mapper.treeToValue(json.get("dependencies"), Dependencies.class);
 
-           
             this.cache = new MetaDataCache(Instant.now().getEpochSecond(), this.data);
 
             Files.createDirectories(this.cacheDir);
@@ -1347,7 +1353,10 @@ public class SpringInit {
         saveCursor();
 
         this.isAddDependencyRunning = true;
+        this.dependencyFirstRender = true;
         renderDialogBackGround();
+        renderDialogWindow();
+        showCursor();
         renderDialog();
 
         while (isAddDependencyRunning) {
@@ -1359,11 +1368,68 @@ public class SpringInit {
                 }
             }
 
-            renderDialog();
+            renderDialogWindow();
         }
 
-        removeDialog();
+        removeDialogWindow();
         restoreCursor();
+    }
+
+    private void renderDialog() {
+        StringBuilder builder = new StringBuilder();
+
+        renderDialogTitle(builder);
+        renderDependencies(builder);
+        renderDialogStatusBar(builder);
+
+        IO.print(builder);
+        this.dependencyFirstRender = false;
+    }
+
+    private void renderDialogTitle(StringBuilder builder) {
+        final String title = " Dependencies ";
+        int corner = 1;
+        int textStart = (this.dependencyDialog.getWidth() - corner * 2 - title.length()) / 2 + corner;
+
+        for (int row = 0; row < this.dependencyDialog.getHeight(); row++) {
+            positionDialogCursor(row, builder);
+            for (int col = 0; col < this.dependencyDialog.getWidth(); col++) {
+                if (row == 0) {
+                    if (col == 0) {
+                        builder.append(TL);
+                    } else if (col == this.dependencyDialog.getWidth() - 1) {
+                        builder.append(TR);
+                    } else if (col == textStart) {
+                        builder.append(title);
+                        col += title.length() - 1;
+                    } else {
+                        builder.append(H);
+                    }
+                } else if (row == this.dependencyDialog.getHeight() - 1) {
+                    if (col == 0) {
+                        builder.append(BL);
+                    } else if (col == this.dependencyDialog.getWidth() - 1) {
+                        builder.append(BR);
+                    } else {
+                        builder.append(H);
+                    }
+                } else {
+                    if (col == 0 || col == this.dependencyDialog.getWidth() - 1) {
+                        builder.append(V);
+                    } else {
+                        builder.append(" ");
+                    }
+                }
+            }
+        }
+    }
+
+    private void renderDependencies(StringBuilder builder) {
+        
+    }
+
+    private void renderDialogStatusBar(StringBuilder builder) {
+        
     }
 
     private void renderDialogBackGround() {
@@ -1390,10 +1456,10 @@ public class SpringInit {
         this.isDimmed = false;
     }
 
-    private void renderDialog() {
+    private void renderDialogWindow() {
         StringBuilder builderDialog = new StringBuilder();
 
-        for (int row = 0; row < dependencyDialog.getHeight(); row++) {
+        for (int row = 0; row < this.dependencyDialog.getHeight(); row++) {
             builderDialog.append("\033[")
                     .append(this.dependencyDialog.getY() + row)
                     .append(";")
@@ -1408,7 +1474,15 @@ public class SpringInit {
         IO.print(builderDialog);
     }
 
-    private void removeDialog() {
+    private void positionDialogCursor(int offset, StringBuilder builderCursor) {
+        builderCursor.append("\033[")
+                .append(this.dependencyDialog.getY() + offset)
+                .append(";")
+                .append(this.dependencyDialog.getX())
+                .append("H");
+    }
+
+    private void removeDialogWindow() {
         StringBuilder builder = new StringBuilder();
 
         builder.append("\033[H");
