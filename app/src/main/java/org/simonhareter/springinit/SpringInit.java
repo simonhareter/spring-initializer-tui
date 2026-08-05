@@ -128,10 +128,11 @@ public class SpringInit {
     private List<DialogRow> DEPENDENCY_MENU_ITEMS;
     private Header filter, selected, available, nothingSelected;
     private Dialog dependencyDialog;
-    private int depCursorY = 1, previousDepCursorY;
+    private int depCursorY = 0, previousDepCursorY = 0, depScrollOffsetY = 0;
     private List<Dependency> selectedDependencies;
     private Dependency[] allDependencies;
-    private static final int SCROLL_DEP_MARGIN = 10;
+    private static final int SCROLL_DEP_MARGIN = 5;
+    private boolean scrollOffsetChanged;
 
     // ------------------------------------------------------------------
 
@@ -1454,17 +1455,16 @@ public class SpringInit {
     // ---------------------- Dependency Dialog Window ------------------
 
     private void addDependencies() {
-        saveCursor();
-
         this.isAddDependencyRunning = true;
         this.dependencyFirstRender = true;
-        this.depCursorY = 1;
-        this.previousDepCursorY = 1;
+        this.depCursorY = 0;
+        this.previousDepCursorY = 0;
+        this.depScrollOffsetY = 0;
         renderDialogBackGround();
         renderDialogWindow();
         renderDialogTitle();
         renderDialog();
-        renderDependencyCursorLine();
+        moveDependencyCursorLine();
         showCursor();
 
         while (isAddDependencyRunning) {
@@ -1476,13 +1476,49 @@ public class SpringInit {
                 }
                 case 'A', 'B' -> {
                     moveDependencyCursor(key);
-                    renderDependencyCursorLine();
+                    moveDependencyCursorLine();
+
+                    if (this.scrollOffsetChanged) {
+                        rerenderDependencies();
+                    }
                 }
+                case 'g' -> {
+                    int key2 = readKey();
+
+                    if (key2 == 'g') {
+                        this.depCursorY = 0;
+                        this.depScrollOffsetY = 0;
+                        this.previousDepCursorY = 0;
+
+                        moveDependencyCursorLine();
+                        rerenderDependencies();
+                    }
+                }
+                case 'G' -> {
+                    int borderRows = 2, statusBarRow = 1, padding = 1;
+
+                    this.depCursorY = this.dependencyDialog.getHeight() - borderRows - statusBarRow - padding - 1;
+                    this.depScrollOffsetY = this.DEPENDENCY_MENU_ITEMS.size() - 1 - this.depCursorY;
+
+                    moveDependencyCursorLine();
+                    rerenderDependencies();
+                }
+
             }
         }
 
         removeDialogWindow();
-        restoreCursor();
+    }
+
+    private void rerenderDependencies() {
+        StringBuilder builder = new StringBuilder();
+
+        renderDependencies(builder);
+        positionDialogCursor(this.depCursorY + 1, 1, builder);
+
+        IO.print(builder);
+
+        this.scrollOffsetChanged = false;
     }
 
     private void moveDependencyCursor(int key) {
@@ -1496,11 +1532,9 @@ public class SpringInit {
 
         switch (dir) {
             case UP -> {
-                IO.print("\033[1A");
                 this.depCursorY--;
             }
             case DOWN -> {
-                IO.print("\033[1B");
                 this.depCursorY++;
             }
             default -> {
@@ -1512,13 +1546,35 @@ public class SpringInit {
     private boolean isIllegalDependencyCursorMove(Direction dir) {
         switch (dir) {
             case UP -> {
-                if (this.depCursorY == 1) {
+                if (this.depCursorY == 0) {
+                    return true;
+                }
+
+                if (this.depCursorY == SCROLL_DEP_MARGIN && this.depScrollOffsetY > 0) {
+                    this.depScrollOffsetY--;
+                    this.scrollOffsetChanged = true;
                     return true;
                 }
             }
             case DOWN -> {
-                if (this.depCursorY == this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN) {
+                int currentIndex = this.depCursorY + this.depScrollOffsetY;
+                int futureIndex = currentIndex + 1;
+
+                if (futureIndex == this.DEPENDENCY_MENU_ITEMS.size()) {
                     return true;
+                }
+
+                int bottomMargin = this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN * 2;
+
+                if (this.depCursorY == bottomMargin) {
+                    int remainingItems = this.DEPENDENCY_MENU_ITEMS.size() - futureIndex;
+                    debug(this.depCursorY + " " + this.depScrollOffsetY);
+
+                    if (remainingItems > SCROLL_DEP_MARGIN) {
+                        this.depScrollOffsetY++;
+                        this.scrollOffsetChanged = true;
+                        return true;
+                    }
                 }
             }
             default -> {
@@ -1528,31 +1584,84 @@ public class SpringInit {
         return false;
     }
 
-    private void renderDependencyCursorLine() {
-        saveCursor();
-
+    private void moveDependencyCursorLine() {
         StringBuilder builder = new StringBuilder();
-        builder.append(DEP_LINE_COLOR).append(" ".repeat(this.dependencyDialog.getWidth() - 2)).append(RESET_BUTTON_BG);
 
-        if (!this.dependencyFirstRender) {
-            DialogRow prevRow = this.DEPENDENCY_MENU_ITEMS.get(this.previousDepCursorY);
-            DialogRow currRow = this.DEPENDENCY_MENU_ITEMS.get(this.depCursorY);
+        DialogRow currRow = this.DEPENDENCY_MENU_ITEMS.get(this.depCursorY + this.depScrollOffsetY);
+        boolean isCurrRowHighlighted = isHighlighted(this.depCursorY);
 
-            renderDependencyRow(prevRow, builder, this.previousDepCursorY,
-                    getOffsetX(prevRow), isHighlighted(this.previousDepCursorY), this.previousDepCursorY);
-            renderDependencyRow(currRow, builder, this.depCursorY, getOffsetX(currRow),
-                    isHighlighted(this.depCursorY), this.depCursorY);
+        renderDependencyCursorLine(builder, isCurrRowHighlighted, this.depCursorY + 1);
+        if (this.scrollOffsetChanged || this.depCursorY <= this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN) {
+            renderDependencyRow(currRow, builder, this.depCursorY + 1, getOffsetX(currRow),
+                    isCurrRowHighlighted, this.depCursorY);
         }
 
-        IO.print(builder);
+        if (!this.dependencyFirstRender) {
+            DialogRow prevRow = this.DEPENDENCY_MENU_ITEMS.get(this.previousDepCursorY + this.depScrollOffsetY);
+            boolean isPrevRowHighlighted = isHighlighted(this.previousDepCursorY);
+
+            renderDependencyCursorLine(builder, isPrevRowHighlighted, this.previousDepCursorY + 1);
+            if (this.scrollOffsetChanged || this.depCursorY <= this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN) {
+                renderDependencyRow(prevRow, builder, this.previousDepCursorY + 1,
+                        getOffsetX(prevRow), isPrevRowHighlighted, this.previousDepCursorY);
+            }
+        }
+
         this.dependencyFirstRender = false;
-        restoreCursor();
+        positionDialogCursor(this.depCursorY + 1, 1, builder);
+        IO.print(builder);
+    }
+
+    private void renderDependencyCursorLine(StringBuilder builder, boolean isHighlighted, int offsetY) {
+        int offsetX = 1;
+        positionDialogCursor(offsetY, offsetX, builder);
+
+        if (isHighlighted) {
+            builder.append(DEP_LINE_COLOR).append(" ".repeat(this.dependencyDialog.getWidth() - 2))
+                    .append(RESET_BUTTON_BG);
+        } else {
+            builder.append(BG).append(" ".repeat(this.dependencyDialog.getWidth() - 2))
+                    .append(RESET_BUTTON_BG);
+        }
+    }
+
+    private void renderDependencyRow(DialogRow row, StringBuilder builder, int offsetY, int offsetX,
+            boolean isHighlighted, int index) {
+        if (row instanceof Header header
+                && header.segments().getFirst().text().equals(this.nothingSelected.segments().getFirst().text())) {
+            offsetX = (this.dependencyDialog.getWidth() - header.segments().getFirst().text().length()) / 2;
+        }
+
+        positionDialogCursor(offsetY, offsetX, builder);
+        renderDependencyCursorLine(builder, isHighlighted, offsetY);
+        positionDialogCursor(offsetY, offsetX, builder);
+
+        if (isHighlighted) {
+            builder.append(DEP_LINE_COLOR);
+        }
+
+        switch (row) {
+            case Spacer _ -> {
+                builder.append("");
+            }
+            case Header header -> {
+                for (TextSegment segment : header.segments()) {
+                    builder.append(segment.color()).append(segment.text());
+                }
+                builder.append(RESET_COLOR);
+            }
+            case DependencyRow depRow -> {
+                builder.append("  ").append(UNSELECTED).append(" ").append(depRow.dependency().name());
+            }
+        }
+
+        builder.append(RESET_COLOR);
     }
 
     private int getOffsetX(DialogRow row) {
         switch (row) {
             case Spacer _ -> {
-                return 0;
+                return 1;
             }
             case Header _ -> {
                 return 2;
@@ -1566,11 +1675,46 @@ public class SpringInit {
     private void renderDialog() {
         StringBuilder builder = new StringBuilder();
 
+        this.DEPENDENCY_MENU_ITEMS = new ArrayList<>();
+        fillDialogRows();
+
         renderDependencies(builder);
         renderDialogStatusBar(builder);
 
         positionDialogCursor(1, 1, builder);
         IO.print(builder);
+    }
+
+    private void renderDependencies(StringBuilder builder) {
+        int offsetY = 1, offsetX = 2;
+
+        for (int i = 0; i < this.DEPENDENCY_MENU_ITEMS.size(); i++) {
+            if (i == this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN + 1) {
+                break;
+            }
+
+            int index = i + this.depScrollOffsetY;
+
+            if (index >= this.DEPENDENCY_MENU_ITEMS.size()) {
+                break;
+            }
+
+            renderDependencyRow(this.DEPENDENCY_MENU_ITEMS.get(i + this.depScrollOffsetY), builder, offsetY, offsetX,
+                    isHighlighted(i), i);
+            offsetY += 1;
+        }
+    }
+
+    private void positionDialogCursor(int offsetY, int offsetX, StringBuilder builderCursor) {
+        builderCursor.append("\033[")
+                .append(this.dependencyDialog.getY() + offsetY)
+                .append(";")
+                .append(this.dependencyDialog.getX() + offsetX)
+                .append("H");
+    }
+
+    private boolean isHighlighted(int index) {
+        return this.depCursorY == index;
     }
 
     private void renderDialogTitle() {
@@ -1617,23 +1761,6 @@ public class SpringInit {
         IO.print(builder);
     }
 
-    private void renderDependencies(StringBuilder builder) {
-        int offsetY = 1, offsetX = 2;
-        this.DEPENDENCY_MENU_ITEMS = new ArrayList<>();
-
-        fillDialogRows();
-
-        for (int i = 0; i < this.DEPENDENCY_MENU_ITEMS.size(); i++) {
-            renderDependencyRow(this.DEPENDENCY_MENU_ITEMS.get(i), builder, offsetY, offsetX, isHighlighted(i), i);
-            offsetY += 1;
-        }
-
-    }
-
-    private boolean isHighlighted(int index) {
-        return this.depCursorY - 1 == index;
-    }
-
     private void fillDialogRows() {
         Spacer spacer = new Spacer();
 
@@ -1665,35 +1792,6 @@ public class SpringInit {
         }
     }
 
-    private void renderDependencyRow(DialogRow row, StringBuilder builder, int offsetY, int offsetX,
-            boolean isHighlighted, int index) {
-        if (index == 4 && row instanceof Header header) {
-            offsetX = (this.dependencyDialog.getWidth() - header.segments().getFirst().text().length()) / 2;
-        }
-
-        positionDialogCursor(offsetY, offsetX, builder);
-
-        if (isHighlighted) {
-            builder.append(DEP_LINE_COLOR);
-        } else {
-            builder.append(BG);
-        }
-
-        switch (row) {
-            case Spacer _ -> {
-                builder.append("");
-            }
-            case Header header -> {
-                for (TextSegment segment : header.segments()) {
-                    builder.append(segment.color()).append(segment.text()).append(RESET_COLOR);
-                }
-            }
-            case DependencyRow depRow -> {
-                builder.append("  ").append(UNSELECTED).append(" ").append(depRow.dependency().name());
-            }
-        }
-    }
-
     private int calculateTotalDependencies() {
         int counter = 0;
 
@@ -1718,8 +1816,8 @@ public class SpringInit {
     private void renderDialogStatusBar(StringBuilder builder) {
         boolean isSelected = false;
 
-        String hintsSelected = "↑↓ Navigate  Space Deselect  Enter Apply  Esc Cancel";
-        String hintsUnselected = "↑↓ Navigate  Space Select  Enter Apply  Esc Cancel";
+        String hintsSelected = "↑↓ Navigate  Space Deselect  gg Start  G End  Enter Apply  Esc Cancel";
+        String hintsUnselected = "↑↓ Navigate  Space Select  gg Start  G End  Enter Apply  Esc Cancel";
         String hints;
 
         if (isSelected) {
@@ -1774,14 +1872,6 @@ public class SpringInit {
         }
 
         IO.print(builderDialog);
-    }
-
-    private void positionDialogCursor(int offsetY, int offsetX, StringBuilder builderCursor) {
-        builderCursor.append("\033[")
-                .append(this.dependencyDialog.getY() + offsetY)
-                .append(";")
-                .append(this.dependencyDialog.getX() + offsetX)
-                .append("H");
     }
 
     private void removeDialogWindow() {
