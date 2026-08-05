@@ -23,26 +23,43 @@ import org.simonhareter.springinit.util.CursorPosition;
 import org.simonhareter.springinit.util.Dependencies;
 import org.simonhareter.springinit.util.Dependency;
 import org.simonhareter.springinit.util.DependencyGroup;
+import org.simonhareter.springinit.util.DependencyRow;
 import org.simonhareter.springinit.util.Dialog;
+import org.simonhareter.springinit.util.DialogRow;
 import org.simonhareter.springinit.util.Direction;
+import org.simonhareter.springinit.util.Header;
 import org.simonhareter.springinit.util.MetaData;
 import org.simonhareter.springinit.util.MetaDataCache;
 import org.simonhareter.springinit.util.MetaDataConfig;
 import org.simonhareter.springinit.util.MetaDataOption;
 import org.simonhareter.springinit.util.Project;
 import org.simonhareter.springinit.util.SectionLayout;
+import org.simonhareter.springinit.util.Spacer;
 import org.simonhareter.springinit.util.TextField;
+import org.simonhareter.springinit.util.TextSegment;
 import org.simonhareter.springinit.util.VisibleRange;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 public class SpringInit {
+
+    // ----------------- Main TUI State ----------------------------------
+
     private final Terminal terminal;
     private final ObjectMapper mapper;
     private final List<List<Integer>> menuGrid;
     private final int[] previousSelection;
     private final int[] currentSelection;
     private final String version = "0.0.1";
+
+    private static final String[] LOGO = {
+            "  ____             _                  ___       _ _   _       _ _          ",
+            " / ___| _ __  _ __(_)_ __   __ _     |_ _|_ __ (_) |_(_) __ _| (_)_____ __ ",
+            " \\___ \\| '_ \\| '__| | '_ \\ / _` |_____| || '_ \\| | __| |/ _` | | |_  / '__|",
+            "  ___) | |_) | |  | | | | | (_| |_____| || | | | | |_| | (_| | | |/ /| |   ",
+            " |____/| .__/|_|  |_|_| |_|\\__, |    |___|_| |_|_|\\__|_|\\__,_|_|_/___|_|   ",
+            "       |_|                 |___/                                            "
+    };
 
     private MetaData data;
     private MetaDataCache cache;
@@ -77,18 +94,16 @@ public class SpringInit {
 
     private CursorPosition textCursorPos;
     private TextField group, artifact, packageName;
+    private static final int TEXT_START = 26;
 
-    private Dialog dependencyDialog;
-    private int depCursorY = 1;
-    private List<Dependency> selectedDependencies;
-    private Dependency[] allDependencies;
-    private static final int SCROLL_DEP_MARGIN = 10;
+    // ----------------- Colors / UI constants --------------------------
 
     private static final String SELECTED = "\u25CF"; // ●
     private static final String UNSELECTED = "\u25CB"; // ○
     private static final String UNDERLINED = "\033[4m";
     private static final String RESET_UNDERLINED = "\033[24m";
     private static final String GREEN = "\033[38;2;109;179;63m";
+    private static final String WHITE = "\033[38;2;193;193;193m";
     private static final String RED = "\033[38;2;220;50;47m";
     private static final String BG = "\033[48;2;21;21;31m";
     private static final String BG_DIMMED = "\033[48;2;10;10;20m";
@@ -99,7 +114,9 @@ public class SpringInit {
     private static final String RESET_BUTTON_BG = "\033[48;2;21;21;31m";
     private static final String RESET_COLOR = "\033[0m";
     private static final String BORDER_COLOR = "\033[38;5;240m";
-    private static final String DEP_LINE_COLOR = "\033[48;2;103;103;152m";
+    private static final String DEP_LINE_COLOR = "\033[48;2;33;33;42m";
+
+    // ----------------- Dependency Dialog Window State -----------------
 
     public static final char TL = '╭';
     public static final char TR = '╮';
@@ -108,16 +125,15 @@ public class SpringInit {
     public static final char H = '─';
     public static final char V = '│';
 
-    private final int TEXT_START = 26;
+    private List<DialogRow> DEPENDENCY_MENU_ITEMS;
+    private Header filter, selected, available, nothingSelected;
+    private Dialog dependencyDialog;
+    private int depCursorY = 1, previousDepCursorY;
+    private List<Dependency> selectedDependencies;
+    private Dependency[] allDependencies;
+    private static final int SCROLL_DEP_MARGIN = 10;
 
-    private String[] logo = {
-            "  ____             _                  ___       _ _   _       _ _          ",
-            " / ___| _ __  _ __(_)_ __   __ _     |_ _|_ __ (_) |_(_) __ _| (_)_____ __ ",
-            " \\___ \\| '_ \\| '__| | '_ \\ / _` |_____| || '_ \\| | __| |/ _` | | |_  / '__|",
-            "  ___) | |_) | |  | | | | | (_| |_____| || | | | | |_| | (_| | | |/ /| |   ",
-            " |____/| .__/|_|  |_|_| |_|\\__, |    |___|_| |_|_|\\__|_|\\__,_|_|_/___|_|   ",
-            "       |_|                 |___/                                            "
-    };
+    // ------------------------------------------------------------------
 
     public SpringInit(Terminal terminal) {
         this.terminal = terminal;
@@ -825,8 +841,8 @@ public class SpringInit {
         }
 
         for (int row = range.start(); row < range.end(); row++) {
-            if (row < this.logo.length) {
-                String line = this.logo[row];
+            if (row < this.LOGO.length) {
+                String line = this.LOGO[row];
 
                 if (this.isDimmed) {
                     builder.append(BG_DIMMED)
@@ -1364,16 +1380,92 @@ public class SpringInit {
         }
     }
 
+    private void renderStatusBar() {
+        saveCursor();
+
+        StringBuilder builder = new StringBuilder();
+
+        if (isDimmed) {
+            builder.append(BG_DIMMED).append(DIMMED);
+        }
+
+        String mode, hints = "↑↓ Navigate   ←→ Change   Enter Edit   Esc Back   Ctrl+C Exit",
+                v = "   v" + this.version;
+
+        if (this.isEditing) {
+            mode = "INSERT";
+        } else {
+            mode = "NORMAL";
+        }
+
+        int spaces = this.columns - mode.length() - hints.length() - v.length();
+
+        builder.append("\033[" + String.valueOf(this.rows - 1) + ";0H");
+        builder.append(mode);
+
+        if (spaces < 1) {
+            builder.append(" ");
+        } else {
+            builder.append(" ".repeat(spaces));
+        }
+
+        builder.append(hints).append(v);
+
+        if (isDimmed) {
+            builder.append(RESET_DIMMED);
+        }
+
+        IO.print(builder);
+        restoreCursor();
+    }
+
+    private void hideCursor() {
+        IO.print("\033[?25l");
+    }
+
+    private void showCursor() {
+        IO.print("\033[?25h");
+    }
+
+    private <T> void debug(T value) {
+        saveCursor();
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("\033[" + String.valueOf(this.rows) + ";0H")
+                .append("\033[2K");
+
+        if (this.isDimmed) {
+            builder.append(BG_DIMMED)
+                    .append(DIMMED);
+        }
+
+        builder.append(" ".repeat(this.columns));
+
+        builder.append("\033[" + String.valueOf(this.rows) + ";0H");
+
+        builder.append(value);
+
+        builder.append(RESET_DIMMED);
+
+        IO.print(builder);
+        restoreCursor();
+    }
+
+    // ---------------------- Dependency Dialog Window ------------------
+
     private void addDependencies() {
         saveCursor();
 
         this.isAddDependencyRunning = true;
         this.dependencyFirstRender = true;
+        this.depCursorY = 1;
+        this.previousDepCursorY = 1;
         renderDialogBackGround();
         renderDialogWindow();
-        showCursor();
         renderDialogTitle();
         renderDialog();
+        renderDependencyCursorLine();
+        showCursor();
 
         while (isAddDependencyRunning) {
             int key = readKey();
@@ -1399,6 +1491,8 @@ public class SpringInit {
         if (isIllegalDependencyCursorMove(dir)) {
             return;
         }
+
+        this.previousDepCursorY = this.depCursorY;
 
         switch (dir) {
             case UP -> {
@@ -1436,10 +1530,37 @@ public class SpringInit {
 
     private void renderDependencyCursorLine() {
         saveCursor();
+
         StringBuilder builder = new StringBuilder();
         builder.append(DEP_LINE_COLOR).append(" ".repeat(this.dependencyDialog.getWidth() - 2)).append(RESET_BUTTON_BG);
+
+        if (!this.dependencyFirstRender) {
+            DialogRow prevRow = this.DEPENDENCY_MENU_ITEMS.get(this.previousDepCursorY);
+            DialogRow currRow = this.DEPENDENCY_MENU_ITEMS.get(this.depCursorY);
+
+            renderDependencyRow(prevRow, builder, this.previousDepCursorY,
+                    getOffsetX(prevRow), isHighlighted(this.previousDepCursorY), this.previousDepCursorY);
+            renderDependencyRow(currRow, builder, this.depCursorY, getOffsetX(currRow),
+                    isHighlighted(this.depCursorY), this.depCursorY);
+        }
+
         IO.print(builder);
+        this.dependencyFirstRender = false;
         restoreCursor();
+    }
+
+    private int getOffsetX(DialogRow row) {
+        switch (row) {
+            case Spacer _ -> {
+                return 0;
+            }
+            case Header _ -> {
+                return 2;
+            }
+            case DependencyRow _ -> {
+                return 2;
+            }
+        }
     }
 
     private void renderDialog() {
@@ -1450,7 +1571,6 @@ public class SpringInit {
 
         positionDialogCursor(1, 1, builder);
         IO.print(builder);
-        this.dependencyFirstRender = false;
     }
 
     private void renderDialogTitle() {
@@ -1498,36 +1618,79 @@ public class SpringInit {
     }
 
     private void renderDependencies(StringBuilder builder) {
-        int offsetY = 2, offsetX = 2;
-        String nothingSelected = "No dependencies.";
+        int offsetY = 1, offsetX = 2;
+        this.DEPENDENCY_MENU_ITEMS = new ArrayList<>();
 
-        // Group Filter: press <C-f> to apply filter
-        positionDialogCursor(offsetY, offsetX, builder);
-        builder.append("Group Filter: press <C-f> to apply filter");
-        offsetY += 2;
+        fillDialogRows();
 
-        positionDialogCursor(offsetY, offsetX, builder);
-        builder.append("Selected ").append(BORDER_COLOR).append("(").append(this.selectedDependencies.size())
-                .append(")").append(RESET_COLOR);
-        offsetY += 1;
+        for (int i = 0; i < this.DEPENDENCY_MENU_ITEMS.size(); i++) {
+            renderDependencyRow(this.DEPENDENCY_MENU_ITEMS.get(i), builder, offsetY, offsetX, isHighlighted(i), i);
+            offsetY += 1;
+        }
 
-        if (this.selectedDependencies.size() == 0) {
-            positionDialogCursor(offsetY, (this.dependencyDialog.getWidth() - nothingSelected.length()) / 2,
-                    builder);
-            builder.append(nothingSelected).append("\r\n");
-            offsetY += 2;
+    }
+
+    private boolean isHighlighted(int index) {
+        return this.depCursorY - 1 == index;
+    }
+
+    private void fillDialogRows() {
+        Spacer spacer = new Spacer();
+
+        this.filter = new Header(List.of(
+                new TextSegment("Group Filter: press <C-f> to apply filter", WHITE)));
+
+        this.selected = new Header(List.of(
+                new TextSegment("Selected ", WHITE),
+                new TextSegment("(" + this.selectedDependencies.size() + ")", BORDER_COLOR)));
+
+        this.available = new Header(List.of(
+                new TextSegment("Available ", WHITE),
+                new TextSegment("(" + calculateTotalDependencies() + ")", BORDER_COLOR)));
+
+        this.nothingSelected = new Header(List.of(
+                new TextSegment("No dependencies.", BORDER_COLOR)));
+
+        this.DEPENDENCY_MENU_ITEMS.add(spacer);
+        this.DEPENDENCY_MENU_ITEMS.add(filter);
+        this.DEPENDENCY_MENU_ITEMS.add(spacer);
+        this.DEPENDENCY_MENU_ITEMS.add(selected);
+        this.DEPENDENCY_MENU_ITEMS.add(nothingSelected);
+        this.DEPENDENCY_MENU_ITEMS.add(spacer);
+        this.DEPENDENCY_MENU_ITEMS.add(available);
+
+        for (Dependency dependency : this.allDependencies) {
+            DependencyRow depRow = new DependencyRow(dependency);
+            this.DEPENDENCY_MENU_ITEMS.add(depRow);
+        }
+    }
+
+    private void renderDependencyRow(DialogRow row, StringBuilder builder, int offsetY, int offsetX,
+            boolean isHighlighted, int index) {
+        if (index == 4 && row instanceof Header header) {
+            offsetX = (this.dependencyDialog.getWidth() - header.segments().getFirst().text().length()) / 2;
         }
 
         positionDialogCursor(offsetY, offsetX, builder);
-        builder.append("Available ").append(BORDER_COLOR).append("(").append(calculateTotalDependencies()).append(")")
-                .append(RESET_COLOR);
-        offsetY += 1;
-        offsetX += 2;
 
-        for (int i = 0; i < this.dependencies.values()[0].values().length; i++) {
-            positionDialogCursor(offsetY, offsetX, builder);
-            builder.append(UNSELECTED).append(" ").append(this.dependencies.values()[0].values()[i].name());
-            offsetY += 1;
+        if (isHighlighted) {
+            builder.append(DEP_LINE_COLOR);
+        } else {
+            builder.append(BG);
+        }
+
+        switch (row) {
+            case Spacer _ -> {
+                builder.append("");
+            }
+            case Header header -> {
+                for (TextSegment segment : header.segments()) {
+                    builder.append(segment.color()).append(segment.text()).append(RESET_COLOR);
+                }
+            }
+            case DependencyRow depRow -> {
+                builder.append("  ").append(UNSELECTED).append(" ").append(depRow.dependency().name());
+            }
         }
     }
 
@@ -1655,74 +1818,4 @@ public class SpringInit {
         renderStatusBar();
     }
 
-    private void renderStatusBar() {
-        saveCursor();
-
-        StringBuilder builder = new StringBuilder();
-
-        if (isDimmed) {
-            builder.append(BG_DIMMED).append(DIMMED);
-        }
-
-        String mode, hints = "↑↓ Navigate   ←→ Change   Enter Edit   Esc Back   Ctrl+C Exit",
-                v = "   v" + this.version;
-
-        if (this.isEditing) {
-            mode = "INSERT";
-        } else {
-            mode = "NORMAL";
-        }
-
-        int spaces = this.columns - mode.length() - hints.length() - v.length();
-
-        builder.append("\033[" + String.valueOf(this.rows - 1) + ";0H");
-        builder.append(mode);
-
-        if (spaces < 1) {
-            builder.append(" ");
-        } else {
-            builder.append(" ".repeat(spaces));
-        }
-
-        builder.append(hints).append(v);
-
-        if (isDimmed) {
-            builder.append(RESET_DIMMED);
-        }
-
-        IO.print(builder);
-        restoreCursor();
-    }
-
-    private void hideCursor() {
-        IO.print("\033[?25l");
-    }
-
-    private void showCursor() {
-        IO.print("\033[?25h");
-    }
-
-    private <T> void debug(T value) {
-        saveCursor();
-
-        StringBuilder builder = new StringBuilder();
-        builder.append("\033[" + String.valueOf(this.rows) + ";0H")
-                .append("\033[2K");
-
-        if (this.isDimmed) {
-            builder.append(BG_DIMMED)
-                    .append(DIMMED);
-        }
-
-        builder.append(" ".repeat(this.columns));
-
-        builder.append("\033[" + String.valueOf(this.rows) + ";0H");
-
-        builder.append(value);
-
-        builder.append(RESET_DIMMED);
-
-        IO.print(builder);
-        restoreCursor();
-    }
 }
